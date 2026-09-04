@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 
-const DEFAULT_ASSISTANT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George (Resonant, authoritative, clear)
+// Official ElevenLabs Premade Voices (100% Free-Tier API Eligible & Included in all plans)
+// JBFqnCBsd6RMkjVDRZzb - George (Deep, authoritative, British/warm) - Default for ULTRON
+// pNInz6obpgDQGcFmaJgB - Adam (Deep, clear narration, American)
+// onwK4e9ZLuTAKqWW03F9 - Daniel (Authoritative, British)
+// 21m00Tcm4TlvDq8ikWAM - Rachel (Calm, clear)
+export const DEFAULT_ASSISTANT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George (Official Premade)
+export const DEFAULT_ASSISTANT_VOICE_NAME = "George";
 
 function resolveVoiceId(configuredId?: string | null): string {
   if (
@@ -12,6 +18,48 @@ function resolveVoiceId(configuredId?: string | null): string {
     return DEFAULT_ASSISTANT_VOICE_ID;
   }
   return configuredId.trim();
+}
+
+async function requestElevenLabsTTS(
+  apiKey: string,
+  voiceId: string,
+  modelId: string,
+  text: string
+): Promise<Response> {
+  return fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: modelId,
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      }),
+    }
+  );
+}
+
+function isVoiceRestrictionOrNotFoundError(status: number, errText: string): boolean {
+  if (status === 404) return true;
+  const lower = errText.toLowerCase();
+  return (
+    lower.includes("library voice") ||
+    lower.includes("upgrade your subscription") ||
+    lower.includes("voice_not_found") ||
+    lower.includes("not_available_for_user") ||
+    lower.includes("cannot use library") ||
+    lower.includes("paid subscription") ||
+    (status === 400 && lower.includes("voice")) ||
+    (status === 403 && lower.includes("voice"))
+  );
 }
 
 export async function POST(request: Request) {
@@ -44,54 +92,31 @@ export async function POST(request: Request) {
       `[TTS] Generating audio: voiceId=${voiceId}, modelId=${modelId}, textLength=${textToSpeak.length}`
     );
 
-    let response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": apiKey,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
-        },
-        body: JSON.stringify({
-          text: textToSpeak,
-          model_id: modelId,
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-          },
-        }),
-      }
+    let response = await requestElevenLabsTTS(
+      apiKey,
+      voiceId,
+      modelId,
+      textToSpeak
     );
 
-    // If custom voice was not found (404), fallback to default voice
-    if (response.status === 404 && voiceId !== DEFAULT_ASSISTANT_VOICE_ID) {
-      console.warn(
-        `[TTS] Voice '${voiceId}' not found (404). Retrying with default voice '${DEFAULT_ASSISTANT_VOICE_ID}'...`
-      );
-      voiceId = DEFAULT_ASSISTANT_VOICE_ID;
-      response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
-        {
-          method: "POST",
-          headers: {
-            "xi-api-key": apiKey,
-            "Content-Type": "application/json",
-            Accept: "audio/mpeg",
-          },
-          body: JSON.stringify({
-            text: textToSpeak,
-            model_id: modelId,
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.75,
-            },
-          }),
-        }
-      );
+    // If custom/configured voice is restricted (e.g. library voice on free tier) or not found, fallback to premade voice
+    if (!response.ok && voiceId !== DEFAULT_ASSISTANT_VOICE_ID) {
+      const errPeek = await response.clone().text().catch(() => "");
+      if (isVoiceRestrictionOrNotFoundError(response.status, errPeek)) {
+        console.warn(
+          `[TTS] Configured voice '${voiceId}' is restricted on Free-tier API or not found (${response.status}). Automatically falling back to official Free-tier premade voice '${DEFAULT_ASSISTANT_VOICE_NAME}' (${DEFAULT_ASSISTANT_VOICE_ID})...`
+        );
+        voiceId = DEFAULT_ASSISTANT_VOICE_ID;
+        response = await requestElevenLabsTTS(
+          apiKey,
+          voiceId,
+          modelId,
+          textToSpeak
+        );
+      }
     }
 
-    console.log(`[TTS] ElevenLabs response status: ${response.status}`);
+    console.log(`[TTS] ElevenLabs final response status: ${response.status}`);
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "Unknown TTS error");
@@ -109,6 +134,34 @@ export async function POST(request: Request) {
         // use raw errText
       }
 
+      // Friendly diagnostics for common error conditions
+      if (
+        response.status === 401 ||
+        parsedMessage.toLowerCase().includes("invalid_api_key")
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "TTS failed: Invalid or unauthorized ELEVENLABS_API_KEY. Please verify your API key.",
+          },
+          { status: 401 }
+        );
+      }
+
+      if (
+        response.status === 429 ||
+        parsedMessage.toLowerCase().includes("quota_exceeded") ||
+        parsedMessage.toLowerCase().includes("credit_limit")
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "TTS failed: ElevenLabs character quota limit reached for this billing period.",
+          },
+          { status: 429 }
+        );
+      }
+
       return NextResponse.json(
         { error: `TTS failed: ${parsedMessage}` },
         { status: response.status }
@@ -117,7 +170,7 @@ export async function POST(request: Request) {
 
     const audioBuffer = await response.arrayBuffer();
     console.log(
-      `[TTS] Audio generation succeeded! Size=${audioBuffer.byteLength} bytes`
+      `[TTS] Audio generation succeeded! Size=${audioBuffer.byteLength} bytes (Voice: ${voiceId})`
     );
 
     return new Response(audioBuffer, {
