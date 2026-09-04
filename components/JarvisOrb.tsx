@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createOrbScene, type OrbSceneApi } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
+import ChatPanel from "@/components/ChatPanel";
+import VoiceMode from "@/components/VoiceMode";
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -20,6 +22,8 @@ export default function JarvisOrb() {
   const trackerRef = useRef<HandTracker | null>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +84,14 @@ export default function JarvisOrb() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in chat input
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
       switch (e.key) {
         case "+":
         case "=":
@@ -96,6 +108,14 @@ export default function JarvisOrb() {
         case "g":
         case "G":
           toggleGestures();
+          break;
+        case "c":
+        case "C":
+          setChatOpen((prev) => !prev);
+          break;
+        case "v":
+        case "V":
+          setVoiceOpen((prev) => !prev);
           break;
       }
     };
@@ -127,12 +147,17 @@ export default function JarvisOrb() {
           </div>
         ) : (
           <div>
+            <span className="key">V</span> voice&nbsp;&nbsp;
+            <span className="key">C</span> chat&nbsp;&nbsp;
             <span className="key">G</span> hand gestures&nbsp;&nbsp;
             <span className="key">R</span> reset&nbsp;&nbsp;
             <span className="key">+/−</span> zoom
           </div>
         )}
       </div>
+
+      {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
+      {voiceOpen && <VoiceMode onClose={() => setVoiceOpen(false)} />}
 
       <div className="hud hud-controls">
         <div className={`camera-panel${cameraOn ? " visible" : ""}`}>
@@ -149,6 +174,22 @@ export default function JarvisOrb() {
         {error && <div className="hud-error">{error}</div>}
 
         <div className="hud-row">
+          <button
+            type="button"
+            className="hud-btn"
+            aria-pressed={voiceOpen}
+            onClick={() => setVoiceOpen((prev) => !prev)}
+          >
+            {voiceOpen ? "EXIT VOICE" : "VOICE"}
+          </button>
+          <button
+            type="button"
+            className="hud-btn"
+            aria-pressed={chatOpen}
+            onClick={() => setChatOpen((prev) => !prev)}
+          >
+            {chatOpen ? "CLOSE CHAT" : "CHAT"}
+          </button>
           <button
             type="button"
             className="hud-btn"
