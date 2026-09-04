@@ -21,10 +21,11 @@ interface ConversationTurn {
   time: string;
 }
 
-const SILENCE_THRESHOLD_MS = 1100; // Silence time before concluding speech turn
-const SPEECH_VOLUME_THRESHOLD = 0.032; // RMS amplitude threshold for user speech
-const BARGE_IN_VOLUME_THRESHOLD = 0.085; // Higher RMS threshold to interrupt during active TTS playback (prevents speaker echo)
-const MIN_SPEECH_DURATION_MS = 350; // Minimum speech length to submit to STT
+const SILENCE_THRESHOLD_MS = 1100; // Silence duration before concluding speech turn
+const SPEECH_VOLUME_THRESHOLD = 0.032; // RMS amplitude threshold to detect user speech in LISTENING
+const BARGE_IN_VOLUME_THRESHOLD = 0.18; // Strict RMS threshold to interrupt during active TTS (prevents speaker feedback)
+const BARGE_IN_GRACE_PERIOD_MS = 1000; // Grace period before voice-based barge-in is armed
+const MIN_SPEECH_DURATION_MS = 350; // Minimum speech duration to submit to STT
 
 export default function VoiceMode({ onClose }: VoiceModeProps) {
   const [state, setState] = useState<VoiceState>("IDLE");
@@ -45,8 +46,11 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
-  const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Controlled single HTMLAudioElement & Session Tracking
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const activeAudioUrlRef = useRef<string | null>(null);
+  const currentTurnIdRef = useRef<number>(0);
 
   const isSpeakingRef = useRef<boolean>(false);
   const speechStartTimeRef = useRef<number>(0);
@@ -56,30 +60,33 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
   const animationFrameRef = useRef<number | null>(null);
   const isMountedRef = useRef<boolean>(true);
 
-  // Stop active TTS audio immediately (used for interruption or cleanup)
-  const stopTTSAudio = useCallback(() => {
-    if (activeAudioRef.current) {
+  // Stop active TTS audio cleanly
+  const stopTTSAudio = useCallback((reason: string = "manual") => {
+    console.log(`[ULTRON TTS] stopTTSAudio called (reason: ${reason})`);
+    const audio = audioElementRef.current;
+    if (audio) {
       try {
-        activeAudioRef.current.pause();
-        activeAudioRef.current.currentTime = 0;
-      } catch {
-        // ignore
+        audio.pause();
+        audio.currentTime = 0;
+      } catch (e) {
+        console.warn("[ULTRON TTS] Error pausing audio element:", e);
       }
-      activeAudioRef.current = null;
     }
+
     if (activeAudioUrlRef.current) {
       try {
         URL.revokeObjectURL(activeAudioUrlRef.current);
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn("[ULTRON TTS] Error revoking audio object URL:", e);
       }
       activeAudioUrlRef.current = null;
     }
   }, []);
 
-  // Complete cleanup function on exit
+  // Complete cleanup function on component unmount
   const cleanupAllResources = useCallback(() => {
-    stopTTSAudio();
+    console.log("[ULTRON TTS] Cleaning up all VoiceMode resources");
+    stopTTSAudio("cleanupAllResources");
 
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -125,7 +132,7 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
   // Forward declarations for conversation pipeline
   const processTurnPipeline = useRef<((audioBlob: Blob) => Promise<void>) | null>(null);
 
-  // Start continuous recording session
+  // Start continuous recording session (LISTENING)
   const startRecordingSession = useCallback(() => {
     if (!streamRef.current || !isMountedRef.current) return;
 
@@ -194,12 +201,15 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
     }
   }, []);
 
-  // Implementation of the turn processing pipeline: STT -> Gemini -> TTS -> Play -> Loop
+  // Robust Conversation Pipeline: STT -> Gemini -> TTS -> Playback -> Next Turn
   processTurnPipeline.current = async (audioBlob: Blob) => {
     if (!isMountedRef.current) return;
 
+    const turnId = ++currentTurnIdRef.current;
+    console.log(`[ULTRON TTS] Starting pipeline turn #${turnId}`);
+
     try {
-      // 1. STT Phase (ElevenLabs Scribe v2)
+      // 1. ElevenLabs STT Phase
       setState("PROCESSING");
       setError(null);
 
@@ -225,14 +235,13 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
       const userTranscript = (sttData.text || "").trim();
 
       if (!userTranscript) {
-        // No speech detected -> automatically resume listening
-        console.log("[VoiceMode] Empty transcript, returning to LISTENING.");
+        console.log(`[VoiceMode] [Turn #${turnId}] Empty transcript, returning to LISTENING.`);
         setState("LISTENING");
         startRecordingSession();
         return;
       }
 
-      console.log(`[VoiceMode] User said: "${userTranscript}"`);
+      console.log(`[VoiceMode] [Turn #${turnId}] User transcript: "${userTranscript}"`);
       setLatestUserText(userTranscript);
 
       const userTurn: ConversationTurn = {
@@ -269,7 +278,7 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
         throw new Error("No response generated by Gemini.");
       }
 
-      console.log(`[VoiceMode] Gemini reply: "${ultronReply}"`);
+      console.log(`[VoiceMode] [Turn #${turnId}] Gemini reply: "${ultronReply}"`);
       setLatestUltronText(ultronReply);
 
       const ultronTurn: ConversationTurn = {
@@ -281,9 +290,18 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
 
       setHistory([...updatedHistory, ultronTurn]);
 
-      // 3. ElevenLabs TTS Phase & Playback
+      // Check if turn was superseded
+      if (turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+        console.log(`[ULTRON TTS] [Turn #${turnId}] Superseded before TTS, cancelling.`);
+        return;
+      }
+
+      // 3. ElevenLabs TTS Request Phase
       setState("SPEAKING");
       speakingStartTimeRef.current = Date.now();
+      interruptionCounterRef.current = 0;
+
+      console.log(`[ULTRON TTS] [Turn #${turnId}] Requesting TTS: textLength=${ultronReply.length}`);
 
       const ttsRes = await fetch("/api/voice/tts", {
         method: "POST",
@@ -291,53 +309,98 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
         body: JSON.stringify({ text: ultronReply }),
       });
 
+      const contentType = ttsRes.headers.get("content-type");
+      console.log(`[ULTRON TTS] [Turn #${turnId}] Response status: ${ttsRes.status}, content-type: ${contentType}`);
+
       if (!ttsRes.ok) {
         const ttsErr = await ttsRes.json().catch(() => ({}));
         throw new Error(ttsErr.error || `TTS HTTP error ${ttsRes.status}`);
       }
 
       const audioBlobResult = await ttsRes.blob();
+      console.log(`[ULTRON TTS] [Turn #${turnId}] Audio blob size: ${audioBlobResult.size} bytes, type: ${audioBlobResult.type}`);
+
+      if (audioBlobResult.size === 0) {
+        throw new Error("TTS returned 0 bytes of audio.");
+      }
+
+      // Check if turn was superseded during fetch
+      if (turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+        console.log(`[ULTRON TTS] [Turn #${turnId}] Superseded after TTS fetch, aborting playback.`);
+        return;
+      }
+
+      // 4. Browser Audio Element Setup & Playback
+      stopTTSAudio("new-turn-starting");
+
       const audioUrl = URL.createObjectURL(audioBlobResult);
       activeAudioUrlRef.current = audioUrl;
+      console.log(`[ULTRON TTS] [Turn #${turnId}] Created Object URL: ${audioUrl}`);
 
-      const audio = new Audio(audioUrl);
-      activeAudioRef.current = audio;
+      let audio = audioElementRef.current;
+      if (!audio) {
+        audio = new Audio();
+        audioElementRef.current = audio;
+      }
 
+      audio.src = audioUrl;
+      audio.preload = "auto";
+      audio.volume = 1.0;
+      audio.muted = false;
+
+      // Handle natural playback completion
       audio.onended = () => {
-        if (!isMountedRef.current) return;
-        console.log("[VoiceMode] Audio playback finished. Returning to LISTENING.");
-        stopTTSAudio();
+        if (!isMountedRef.current || turnId !== currentTurnIdRef.current) return;
+        console.log(`[ULTRON TTS] [Turn #${turnId}] Audio ended naturally. Returning to LISTENING.`);
+        stopTTSAudio("audio-onended");
 
-        // 4. Automatic Loop: Transition back to LISTENING seamlessly
         setState("LISTENING");
         startRecordingSession();
       };
 
+      // Handle audio errors
       audio.onerror = (e) => {
-        console.error("[VoiceMode] Audio playback error:", e);
-        stopTTSAudio();
-        if (isMountedRef.current) {
-          setState("LISTENING");
-          startRecordingSession();
-        }
+        console.error(`[ULTRON TTS] [Turn #${turnId}] Audio element onerror event:`, e);
+        if (!isMountedRef.current || turnId !== currentTurnIdRef.current) return;
+        stopTTSAudio("audio-onerror");
+
+        setState("LISTENING");
+        startRecordingSession();
       };
 
-      await audio.play().catch((playErr) => {
-        console.warn("[VoiceMode] Autoplay failed or interrupted:", playErr);
-        stopTTSAudio();
-        if (isMountedRef.current) {
+      console.log(`[ULTRON TTS] [Turn #${turnId}] Invoking audio.play()... (volume=${audio.volume}, muted=${audio.muted})`);
+
+      try {
+        await audio.play();
+        console.log(
+          `[ULTRON TTS] [Turn #${turnId}] audio.play() RESOLVED successfully! (duration=${audio.duration}s, paused=${audio.paused})`
+        );
+      } catch (playErr) {
+        const errName = (playErr as Error)?.name;
+        console.warn(`[ULTRON TTS] [Turn #${turnId}] audio.play() rejected (${errName}):`, playErr);
+
+        if (errName === "NotAllowedError") {
+          setError("AUTOPLAY BLOCKED BY BROWSER: CLICK TO UNMUTE AUDIO");
+        } else if (errName !== "AbortError") {
+          setError(`AUDIO PLAYBACK ERROR: ${(playErr as Error)?.message || "Playback failed"}`);
+        }
+
+        stopTTSAudio("play-rejected");
+        if (isMountedRef.current && turnId === currentTurnIdRef.current) {
           setState("LISTENING");
           startRecordingSession();
         }
-      });
+      }
     } catch (err: unknown) {
-      console.error("[VoiceMode] Error in pipeline:", err);
+      console.error(`[ULTRON TTS] [Turn #${turnId}] Pipeline error:`, err);
       const msg = err instanceof Error ? err.message : "Voice transaction failed.";
       setError(msg);
 
+      stopTTSAudio("pipeline-error");
+
       // Return to listening after displaying error briefly
       setTimeout(() => {
-        if (isMountedRef.current) {
+        if (isMountedRef.current && turnId === currentTurnIdRef.current) {
           setError(null);
           setState("LISTENING");
           startRecordingSession();
@@ -373,12 +436,16 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
       if (stateRef.current === "SPEAKING") {
         const timeSinceSpeakingStart = now - speakingStartTimeRef.current;
 
-        // Barge-in guard: require 400ms grace period and higher volume to avoid speaker feedback
-        if (timeSinceSpeakingStart > 400 && rms > BARGE_IN_VOLUME_THRESHOLD) {
+        // Barge-in guard: require grace period and high sustained volume to prevent speaker echo feedback
+        if (
+          timeSinceSpeakingStart > BARGE_IN_GRACE_PERIOD_MS &&
+          rms > BARGE_IN_VOLUME_THRESHOLD
+        ) {
           interruptionCounterRef.current++;
-          if (interruptionCounterRef.current >= 4) {
-            console.log("[VoiceMode] User interruption confirmed! Stopping TTS.");
-            stopTTSAudio();
+          if (interruptionCounterRef.current >= 12) {
+            console.log("[ULTRON TTS] User voice interruption detected! Stopping TTS.");
+            currentTurnIdRef.current++; // Invalidate current turn
+            stopTTSAudio("voice-barge-in");
             setState("LISTENING");
             startRecordingSession();
             isSpeakingRef.current = true;
@@ -438,7 +505,7 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
     animationFrameRef.current = requestAnimationFrame(checkAudio);
   }, [startRecordingSession, stopTTSAudio]);
 
-  // Initialize Microphone & AudioContext on Mount
+  // Initialize Microphone, AudioContext & Unlock Autoplay on Mount
   useEffect(() => {
     isMountedRef.current = true;
 
@@ -480,6 +547,12 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
         source.connect(analyser);
         analyserRef.current = analyser;
 
+        // Pre-create and unlock audio element attached to user gesture
+        if (audioElementRef.current) {
+          audioElementRef.current.volume = 1.0;
+          audioElementRef.current.muted = false;
+        }
+
         setState("LISTENING");
         startRecordingSession();
         runVADLoop();
@@ -507,7 +580,9 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
   // Handle manual interrupt button
   const handleManualInterrupt = () => {
     if (state === "SPEAKING") {
-      stopTTSAudio();
+      console.log("[ULTRON TTS] Manual interrupt button clicked");
+      currentTurnIdRef.current++;
+      stopTTSAudio("manual-button-interrupt");
       setState("LISTENING");
       startRecordingSession();
     }
@@ -535,6 +610,14 @@ export default function VoiceMode({ onClose }: VoiceModeProps) {
 
   return (
     <div className="voice-panel" role="dialog" aria-label="ULTRON Real-Time Voice Mode">
+      {/* Hidden audio element for browser-managed audio playback */}
+      <audio
+        ref={audioElementRef}
+        playsInline
+        preload="auto"
+        style={{ display: "none" }}
+      />
+
       {/* Header */}
       <div className="voice-header">
         <div className="voice-header-left">

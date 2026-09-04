@@ -177,7 +177,9 @@ export async function POST(request: Request) {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-cache",
+        "Content-Length": audioBuffer.byteLength.toString(),
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
       },
     });
   } catch (err: unknown) {
