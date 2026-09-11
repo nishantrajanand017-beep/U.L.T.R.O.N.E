@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createOrbScene, type OrbSceneApi } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
+import ChatPanel from "@/components/ChatPanel";
+import VoiceMode from "@/components/VoiceMode";
+import SettingsModal from "@/components/SettingsModal";
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -20,6 +23,9 @@ export default function JarvisOrb() {
   const trackerRef = useRef<HandTracker | null>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +86,14 @@ export default function JarvisOrb() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in chat input
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
       switch (e.key) {
         case "+":
         case "=":
@@ -96,6 +110,18 @@ export default function JarvisOrb() {
         case "g":
         case "G":
           toggleGestures();
+          break;
+        case "c":
+        case "C":
+          setChatOpen((prev) => !prev);
+          break;
+        case "v":
+        case "V":
+          setVoiceOpen((prev) => !prev);
+          break;
+        case "s":
+        case "S":
+          setSettingsOpen((prev) => !prev);
           break;
       }
     };
@@ -127,12 +153,29 @@ export default function JarvisOrb() {
           </div>
         ) : (
           <div>
+            <span className="key">S</span> settings&nbsp;&nbsp;
+            <span className="key">V</span> voice&nbsp;&nbsp;
+            <span className="key">C</span> chat&nbsp;&nbsp;
             <span className="key">G</span> hand gestures&nbsp;&nbsp;
             <span className="key">R</span> reset&nbsp;&nbsp;
             <span className="key">+/−</span> zoom
           </div>
         )}
       </div>
+
+      {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
+      {voiceOpen && (
+        <VoiceMode
+          onClose={() => {
+            sceneRef.current?.setVoiceState("IDLE");
+            sceneRef.current?.setAudioLevel(0);
+            setVoiceOpen(false);
+          }}
+          onStateChange={(s) => sceneRef.current?.setVoiceState(s)}
+          onAudioLevel={(l) => sceneRef.current?.setAudioLevel(l)}
+        />
+      )}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       <div className="hud hud-controls">
         <div className={`camera-panel${cameraOn ? " visible" : ""}`}>
@@ -151,6 +194,33 @@ export default function JarvisOrb() {
         <div className="hud-row">
           <button
             type="button"
+            id="hud-btn-settings"
+            className="hud-btn"
+            aria-pressed={settingsOpen}
+            onClick={() => setSettingsOpen((prev) => !prev)}
+          >
+            {settingsOpen ? "CLOSE SETTINGS" : "SETTINGS"}
+          </button>
+          <button
+            type="button"
+            id="hud-btn-voice"
+            className="hud-btn"
+            aria-pressed={voiceOpen}
+            onClick={() => setVoiceOpen((prev) => !prev)}
+          >
+            {voiceOpen ? "EXIT VOICE" : "VOICE"}
+          </button>
+          <button
+            type="button"
+            id="hud-btn-chat"
+            className="hud-btn"
+            aria-pressed={chatOpen}
+            onClick={() => setChatOpen((prev) => !prev)}
+          >
+            {chatOpen ? "CLOSE CHAT" : "CHAT"}
+          </button>
+          <button
+            type="button"
             className="hud-btn"
             aria-pressed={cameraOn}
             onClick={toggleGestures}
@@ -160,13 +230,27 @@ export default function JarvisOrb() {
           </button>
         </div>
         <div className="hud-row">
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomIn()} aria-label="Zoom in">
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => sceneRef.current?.zoomIn()}
+            aria-label="Zoom in"
+          >
             +
           </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomOut()} aria-label="Zoom out">
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => sceneRef.current?.zoomOut()}
+            aria-label="Zoom out"
+          >
             −
           </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.resetView()}>
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => sceneRef.current?.resetView()}
+          >
             RESET
           </button>
         </div>

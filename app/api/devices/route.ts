@@ -1,0 +1,24 @@
+import { NextResponse } from "next/server";
+import { resolveUserSession, attachSessionCookie } from "@/lib/auth/session";
+import { listUserDevices } from "@/lib/db/deviceStore";
+
+export async function GET(request: Request) {
+  try {
+    const { userId, isNew } = resolveUserSession(request);
+    const devices = await listUserDevices(userId);
+
+    const response = NextResponse.json({
+      success: true,
+      devices,
+    });
+
+    if (isNew) {
+      attachSessionCookie(response, userId);
+    }
+
+    return response;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Failed to list devices.";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
