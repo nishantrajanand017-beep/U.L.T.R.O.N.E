@@ -9,5 +9,5 @@
     <string name="btn_pair">PAIR DEVICE</string>
     <string name="btn_unpair">DISCONNECT / UNPAIR</string>
     <string name="hint_pairing_code">Enter 6-digit pairing code (e.g. 7AF49C)</string>
-    <string name="hint_server_url">Server URL (e.g. http://10.0.2.2:3000)</string>
+    <string name="hint_server_url">Server URL (e.g. https://u-l-t-r-o-n-e.vercel.app)</string>
 </resources>

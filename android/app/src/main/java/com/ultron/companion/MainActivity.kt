@@ -101,10 +101,13 @@ class MainActivity : AppCompatActivity() {
             binding.tvConnectionStatus.setTextColor(getColor(R.color.ultron_amber))
 
             val wsResult = apiClient.getWebSocketInfo(serverUrl)
-            val wsUrl = wsResult.getOrDefault(
+            var wsUrl = wsResult.getOrDefault(
                 if (serverUrl.startsWith("https://")) serverUrl.replace("https://", "wss://")
                 else serverUrl.replace("http://", "ws://")
             )
+            if (serverUrl.startsWith("https://") && wsUrl.startsWith("ws://")) {
+                wsUrl = wsUrl.replace("ws://", "wss://")
+            }
             wsManager.connect(wsUrl, token)
         }
     }
@@ -166,7 +169,7 @@ class MainActivity : AppCompatActivity() {
                 binding.etPairingCode.text?.clear()
                 refreshState()
             }.onFailure { error ->
-                showMessage("Pairing failed: ${error.message}")
+                showMessage("Pairing failed [${error.javaClass.simpleName}]: ${error.message} (Target: $serverUrl)")
             }
         }
     }

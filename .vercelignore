@@ -1,0 +1,8 @@
+# Ignore Android native files from web deployment
+android/
+
+# Build caches
+.next/
+data/
+*.tsbuildinfo
+tsconfig.tsbuildinfo

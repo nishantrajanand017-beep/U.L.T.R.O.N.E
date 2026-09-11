@@ -26,7 +26,7 @@ class DevicePreferences(context: Context) {
     }
 
     var serverUrl: String
-        get() = prefs.getString(KEY_SERVER_URL, "http://10.0.2.2:3000") ?: "http://10.0.2.2:3000"
+        get() = prefs.getString(KEY_SERVER_URL, "https://u-l-t-r-o-n-e.vercel.app") ?: "https://u-l-t-r-o-n-e.vercel.app"
         set(value) = prefs.edit().putString(KEY_SERVER_URL, value.trim()).apply()
 
     var deviceId: String?

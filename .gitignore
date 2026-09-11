@@ -41,3 +41,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+
+# android build artifacts
+.gradle/
+**/build/
+*.apk
+local.properties
+.kotlin/
+

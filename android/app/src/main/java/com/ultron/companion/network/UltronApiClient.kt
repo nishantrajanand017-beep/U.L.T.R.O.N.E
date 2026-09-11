@@ -26,8 +26,9 @@ data class HeartbeatResponse(
 
 class UltronApiClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 ) {
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -38,10 +39,18 @@ class UltronApiClient(
         deviceName: String,
         appVersion: String = "1.0.0"
     ): Result<PairingResponse> = withContext(Dispatchers.IO) {
-        try {
-            val normalizedUrl = serverUrl.trimEnd('/')
-            val endpoint = "$normalizedUrl/api/devices/pairing/claim"
+        val normalizedUrl = serverUrl.trimEnd('/')
+        val endpoint = "$normalizedUrl/api/devices/pairing/claim"
+        val startTime = System.currentTimeMillis()
 
+        android.util.Log.d("ULTRON_PAIRING", "--> [START] Claim Pairing Request")
+        android.util.Log.d("ULTRON_PAIRING", "Target URL: $endpoint")
+        android.util.Log.d("ULTRON_PAIRING", "HTTP Method: POST")
+        android.util.Log.d("ULTRON_PAIRING", "Start Time: $startTime ms")
+        android.util.Log.d("ULTRON_PAIRING", "Connect Timeout: ${client.connectTimeoutMillis} ms")
+        android.util.Log.d("ULTRON_PAIRING", "Read Timeout: ${client.readTimeoutMillis} ms")
+
+        try {
             val jsonBody = JSONObject().apply {
                 put("pairingCode", pairingCode.trim().uppercase())
                 put("deviceName", deviceName)
@@ -49,13 +58,19 @@ class UltronApiClient(
                 put("appVersion", appVersion)
             }
 
+            android.util.Log.d("ULTRON_PAIRING", "Payload: $jsonBody")
+
             val request = Request.Builder()
                 .url(endpoint)
                 .post(jsonBody.toString().toRequestBody(jsonMediaType))
                 .build()
 
             val response = client.newCall(request).execute()
+            val duration = System.currentTimeMillis() - startTime
             val responseBody = response.body?.string() ?: ""
+
+            android.util.Log.d("ULTRON_PAIRING", "<-- [RESPONSE] in ${duration}ms: HTTP ${response.code}")
+            android.util.Log.d("ULTRON_PAIRING", "Response Body: $responseBody")
 
             if (!response.isSuccessful) {
                 val errorMsg = try {
@@ -77,6 +92,8 @@ class UltronApiClient(
                 )
             )
         } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startTime
+            android.util.Log.e("ULTRON_PAIRING", "<-- [EXCEPTION] in ${duration}ms: [${e.javaClass.name}] ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -130,7 +147,10 @@ class UltronApiClient(
 
             if (response.isSuccessful) {
                 val json = JSONObject(responseBody)
-                val wsUrl = json.optString("wsUrl", "")
+                var wsUrl = json.optString("wsUrl", "")
+                if (normalizedUrl.startsWith("https://") && wsUrl.startsWith("ws://")) {
+                    wsUrl = wsUrl.replace("ws://", "wss://")
+                }
                 if (wsUrl.isNotEmpty()) {
                     return@withContext Result.success(wsUrl)
                 }

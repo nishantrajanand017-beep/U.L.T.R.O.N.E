@@ -45,9 +45,9 @@ async function runAllTests() {
   _clearPairingSessionsForTest();
 
   // Test 1: Pairing Session Generation
-  await test("1. Cryptographic Single-Use 5-Minute Pairing Session", () => {
+  await test("1. Cryptographic Single-Use 5-Minute Pairing Session", async () => {
     const userId = "usr_pair_test_1";
-    const session = createPairingSession(userId);
+    const session = await createPairingSession(userId);
 
     assert.ok(session.code, "Code must exist");
     assert.equal(session.code.length, 6, "Code should be 6 characters");
@@ -55,14 +55,14 @@ async function runAllTests() {
     assert.ok(session.expiresAt > Date.now(), "expiresAt must be in the future");
     assert.equal(session.expiresInSeconds, 300, "TTL must be 300 seconds (5 min)");
 
-    const session2 = createPairingSession(userId);
+    const session2 = await createPairingSession(userId);
     assert.notEqual(session.code, session2.code, "Codes must be unique");
   });
 
   // Test 2: Pairing Claim Flow
   await test("2. Pairing Claim Execution & Single-Use Enforcement", async () => {
     const userId = "usr_claim_test_1";
-    const session = createPairingSession(userId);
+    const session = await createPairingSession(userId);
 
     // Valid claim
     const result = await claimPairingSession(
@@ -101,8 +101,8 @@ async function runAllTests() {
     const userA = "usr_iso_a_" + Date.now();
     const userB = "usr_iso_b_" + Date.now();
 
-    const sessionA = createPairingSession(userA);
-    const sessionB = createPairingSession(userB);
+    const sessionA = await createPairingSession(userA);
+    const sessionB = await createPairingSession(userB);
 
     const devA = await claimPairingSession(sessionA.code, "User A Galaxy S24");
     const devB = await claimPairingSession(sessionB.code, "User B OnePlus 12");
@@ -131,7 +131,7 @@ async function runAllTests() {
   // Test 4: Heartbeat & Connection Tracking
   await test("4. Device Heartbeat Verification & Status Tracking", async () => {
     const user = "usr_heartbeat_" + Date.now();
-    const session = createPairingSession(user);
+    const session = await createPairingSession(user);
     const claimed = await claimPairingSession(session.code, "Heartbeat Device");
 
     // Verify token
@@ -232,7 +232,7 @@ async function runAllTests() {
     startDeviceWebSocketServer(wsPort);
 
     const user = "usr_ws_test_" + Date.now();
-    const session = createPairingSession(user);
+    const session = await createPairingSession(user);
     const claimed = await claimPairingSession(session.code, "WebSocket Android Phone");
 
     await new Promise<void>((resolve, reject) => {
@@ -268,7 +268,7 @@ async function runAllTests() {
   // Test 7: Zero Plaintext Token Storage
   await test("7. Zero Raw Token Leakage in Public Interfaces", async () => {
     const user = "usr_token_leak_" + Date.now();
-    const session = createPairingSession(user);
+    const session = await createPairingSession(user);
     const claimed = await claimPairingSession(session.code, "Leak Test Phone");
 
     const list = await listUserDevices(user);

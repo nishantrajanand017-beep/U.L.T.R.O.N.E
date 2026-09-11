@@ -5,7 +5,7 @@ import { createPairingSession } from "@/lib/db/deviceStore";
 export async function POST(request: Request) {
   try {
     const { userId, isNew } = resolveUserSession(request);
-    const session = createPairingSession(userId);
+    const session = await createPairingSession(userId);
 
     const response = NextResponse.json({
       success: true,

@@ -58,10 +58,13 @@ class HeartbeatService : Service() {
 
         serviceScope.launch {
             val wsResult = apiClient.getWebSocketInfo(serverUrl)
-            val wsUrl = wsResult.getOrDefault(
+            var wsUrl = wsResult.getOrDefault(
                 if (serverUrl.startsWith("https://")) serverUrl.replace("https://", "wss://")
                 else serverUrl.replace("http://", "ws://")
             )
+            if (serverUrl.startsWith("https://") && wsUrl.startsWith("ws://")) {
+                wsUrl = wsUrl.replace("ws://", "wss://")
+            }
             wsManager.connect(wsUrl, token)
         }
     }
