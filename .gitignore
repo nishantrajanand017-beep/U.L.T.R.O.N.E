@@ -37,3 +37,7 @@ yarn-error.log*
 # secure local storage
 /data/
 *.tmp
+
+# typescript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
