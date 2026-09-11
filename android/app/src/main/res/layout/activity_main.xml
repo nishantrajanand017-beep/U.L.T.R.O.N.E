@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ultron_bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- HUD Header -->
+        <TextView
+            android:id="@+id/tvHeaderTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/title_ultron_companion"
+            android:textColor="@color/ultron_amber_light"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.15" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="SECURE HARDWARE BRIDGE · PHASE 11"
+            android:textColor="@color/ultron_subtext"
+            android:textSize="11sp"
+            android:letterSpacing="0.1" />
+
+        <!-- Status Card -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            app:cardBackgroundColor="@color/ultron_card"
+            app:cardCornerRadius="6dp"
+            app:strokeColor="@color/ultron_border"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="DEVICE LINK STATUS"
+                    android:textColor="@color/ultron_amber"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.12" />
+
+                <TextView
+                    android:id="@+id/tvConnectionStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/status_unpaired"
+                    android:textColor="@color/ultron_cyan"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginVertical="12dp"
+                    android:background="@color/ultron_border" />
+
+                <!-- Account / Device Info -->
+                <TextView
+                    android:id="@+id/tvDeviceInfo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Device: Not Paired"
+                    android:textColor="@color/ultron_text"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvAccountId"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Account ID: --"
+                    android:textColor="@color/ultron_subtext"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/tvHeartbeatInfo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Last Heartbeat: Never"
+                    android:textColor="@color/ultron_subtext"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Configuration Section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="SERVER CONFIGURATION"
+            android:textColor="@color/ultron_amber"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.12" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            app:boxStrokeColor="@color/ultron_amber"
+            app:hintTextColor="@color/ultron_amber"
+            android:textColorHint="@color/ultron_subtext">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etServerUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/hint_server_url"
+                android:inputType="textUri"
+                android:textColor="@color/ultron_text"
+                android:textSize="13sp" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Pairing Input Form (shown when unpaired) -->
+        <LinearLayout
+            android:id="@+id/layoutPairingForm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ACCOUNT PAIRING"
+                android:textColor="@color/ultron_amber"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.12" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                app:boxStrokeColor="@color/ultron_cyan"
+                app:hintTextColor="@color/ultron_cyan"
+                android:textColorHint="@color/ultron_subtext">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etPairingCode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/hint_pairing_code"
+                    android:inputType="textCapCharacters"
+                    android:textColor="@color/ultron_cyan"
+                    android:textSize="16sp"
+                    android:letterSpacing="0.2" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPair"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="14dp"
+                android:backgroundTint="@color/ultron_card"
+                android:text="@string/btn_pair"
+                android:textColor="@color/ultron_amber_light"
+                app:strokeColor="@color/ultron_amber"
+                app:strokeWidth="1dp"
+                app:cornerRadius="4dp" />
+        </LinearLayout>
+
+        <!-- Paired Actions (shown when paired) -->
+        <LinearLayout
+            android:id="@+id/layoutPairedActions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnUnpair"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:backgroundTint="@color/ultron_card"
+                android:text="@string/btn_unpair"
+                android:textColor="@color/ultron_red"
+                app:strokeColor="@color/ultron_red"
+                app:strokeWidth="1dp"
+                app:cornerRadius="4dp" />
+        </LinearLayout>
+
+        <!-- Feedback & Log status -->
+        <TextView
+            android:id="@+id/tvStatusMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:textColor="@color/ultron_amber"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+</ScrollView>

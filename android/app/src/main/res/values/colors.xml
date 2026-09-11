@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ultron_bg">#0A0502</color>
+    <color name="ultron_card">#190C02</color>
+    <color name="ultron_cyan">#00F0FF</color>
+    <color name="ultron_amber">#FFAA30</color>
+    <color name="ultron_amber_light">#FFCC66</color>
+    <color name="ultron_green">#00FFAA</color>
+    <color name="ultron_red">#FF5533</color>
+    <color name="ultron_text">#FFE6AA</color>
+    <color name="ultron_subtext">#AA8855</color>
+    <color name="ultron_border">#55FFAA30</color>
+</resources>

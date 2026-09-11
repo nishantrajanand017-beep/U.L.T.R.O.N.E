@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">ULTRON Companion</string>
+    <string name="title_ultron_companion">U.L.T.R.O.N. // COMPANION LINK</string>
+    <string name="status_unpaired">DEVICE UNPAIRED</string>
+    <string name="status_paired">PAIRED &amp; AUTHORIZED</string>
+    <string name="status_connected">CONNECTED // WSS ACTIVE</string>
+    <string name="status_connecting">CONNECTING TO ULTRON…</string>
+    <string name="status_offline">OFFLINE // DISCONNECTED</string>
+    <string name="btn_pair">PAIR DEVICE</string>
+    <string name="btn_unpair">DISCONNECT / UNPAIR</string>
+    <string name="hint_pairing_code">Enter 6-digit pairing code (e.g. 7AF49C)</string>
+    <string name="hint_server_url">Server URL (e.g. http://10.0.2.2:3000)</string>
+</resources>
