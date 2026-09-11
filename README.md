@@ -1,53 +1,50 @@
-# ULTRON Orb UI
+# ULTRON — Personal AI Assistant
 
-An Iron Man–inspired holographic orb built with **Next.js**, **Three.js**, and **MediaPipe** hand tracking — control it with your bare hands through your webcam.
+A futuristic multimodal AI assistant built around an Iron Man–inspired holographic orb interface.
 
-## Getting started
+ULTRON combines a real-time 3D interface with AI conversation, voice interaction, hand gestures, secure user API-key management, and an Android companion architecture.
 
-```bash
-npm install
-npm run dev
-```
+The project is designed as a personal AI system that can eventually understand natural language, communicate through voice, and securely interact with connected devices.
 
-Open [http://localhost:3000](http://localhost:3000).
+---
 
-## Controls
+## ✨ Features
 
-### Mouse / touch
+### 🔮 Holographic Orb Interface
 
-| Input | Action |
-| --- | --- |
-| Drag | Spin the orb |
-| Scroll / pinch | Zoom in & out |
+- Interactive Three.js 3D orb
+- Futuristic HUD interface
+- Real-time orb state changes
+- Listening, thinking, executing, speaking and error states
+- Audio-reactive visual effects
+- Mouse and touch interaction
+- Zoom and rotation controls
 
-### Hand gestures (webcam)
+### 🧠 Gemini AI
 
-Click **GESTURES OFF** (or press `G`) and allow camera access, then:
+ULTRON uses **Google Gemini** as its primary intelligence layer.
 
-| Gesture | Action |
-| --- | --- |
-| Pinch (thumb + index) one hand and move it | Spin the orb |
-| Pinch with **both** hands, spread apart / bring together | Zoom in / out |
+- Gemini 3.6 Flash
+- Natural-language conversations
+- Context-aware chat
+- User-provided Gemini API keys
+- Secure server-side API-key handling
+- Developer fallback key support
+- API-key validation and testing
 
-### Keyboard
+Normal text chat uses Gemini directly and does not activate voice output.
 
-| Key | Action |
-| --- | --- |
-| `G` | Toggle hand gestures |
-| `R` | Reset the view |
-| `+` / `−` | Zoom in / out |
+### 🎙️ Voice Mode
 
-## How it works
+ULTRON supports real-time voice interaction:
 
-- **`lib/orbScene.ts`** — the Three.js scene: layered wireframe shells, a spiral
-  inner core, floating code-text sprites, orbiting debris, dust particles, scan
-  rings, and a bloom + chromatic-aberration post-processing stack.
-- **`lib/handTracker.ts`** — MediaPipe HandLandmarker running on the webcam
-  feed. Pinch detection with hysteresis: one pinched hand spins the orb, two
-  pinched hands zoom by spreading apart or together.
-- **`components/JarvisOrb.tsx`** — the HUD and glue between the scene, the
-  tracker, and your inputs.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+```text
+User Speech
+     ↓
+Speech-to-Text
+     ↓
+Gemini 3.6 Flash
+     ↓
+ElevenLabs Text-to-Speech
+     ↓
+ULTRON Voice

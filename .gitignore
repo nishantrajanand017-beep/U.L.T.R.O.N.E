@@ -34,5 +34,10 @@ yarn-error.log*
 # vercel
 .vercel
 
-.vercel
-.env*
+# secure local storage
+/data/
+*.tmp
+
+# typescript
+*.tsbuildinfo
+tsconfig.tsbuildinfo

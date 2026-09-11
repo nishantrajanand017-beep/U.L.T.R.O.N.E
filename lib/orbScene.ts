@@ -5,6 +5,14 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 
+export type OrbVoiceState =
+  | "IDLE"
+  | "LISTENING"
+  | "PROCESSING"
+  | "THINKING"
+  | "SPEAKING"
+  | "ERROR";
+
 export interface OrbSceneApi {
   /** Rotate the camera around the orb by the given angles (radians). */
   rotateBy(deltaTheta: number, deltaPhi: number): void;
@@ -13,6 +21,8 @@ export interface OrbSceneApi {
   zoomIn(): void;
   zoomOut(): void;
   resetView(): void;
+  setVoiceState(state: OrbVoiceState): void;
+  setAudioLevel(level: number): void;
   dispose(): void;
 }
 
@@ -691,58 +701,94 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
   }
 
   // ═══════════════════════════════════════════════
-  // ANIMATION
+  // ANIMATION & VOICE REACTIVITY
   // ═══════════════════════════════════════════════
   const clock = new THREE.Clock();
   let flickerTimer = 0;
   let rafId = 0;
   let disposed = false;
 
+  let currentVoiceState: OrbVoiceState = "IDLE";
+  let currentAudioLevel = 0;
+
+  function setVoiceState(state: OrbVoiceState) {
+    currentVoiceState = state;
+  }
+
+  function setAudioLevel(level: number) {
+    currentAudioLevel = THREE.MathUtils.clamp(level, 0, 1);
+  }
+
   function animate() {
     if (disposed) return;
     rafId = requestAnimationFrame(animate);
     const t = clock.getElapsedTime();
 
+    // Voice state dynamic speed adjustments
+    const isSpeaking = currentVoiceState === "SPEAKING";
+    const isThinking = currentVoiceState === "THINKING";
+    const isListening = currentVoiceState === "LISTENING";
+    const isError = currentVoiceState === "ERROR";
+
     // Outer shell rotation
-    outerShell.rotation.y += 0.0015;
+    const shellSpeed = isSpeaking ? 0.0028 : isThinking ? 0.0035 : 0.0015;
+    outerShell.rotation.y += shellSpeed;
     outerShell.rotation.x = Math.sin(t * 0.08) * 0.05;
 
     // Panel group follows shell but with slight offset
-    panelGroup.rotation.y += 0.0018;
+    panelGroup.rotation.y += shellSpeed * 1.2;
     panelGroup.rotation.x = Math.sin(t * 0.08 + 0.5) * 0.04;
 
     // Secondary shell counter-rotates slowly
     shell2.rotation.y -= 0.001;
     shell2.rotation.z = Math.sin(t * 0.12) * 0.03;
 
-    // Inner core — opposite, faster
-    innerCore.rotation.y -= 0.005;
+    // Inner core — opposite, faster (rapid spinning during THINKING)
+    const coreRotSpeed = isThinking ? 0.016 : isSpeaking ? 0.008 : 0.005;
+    innerCore.rotation.y -= coreRotSpeed;
     innerCore.rotation.z += 0.002;
     innerCore.rotation.x = Math.cos(t * 0.1) * 0.08;
 
     // Innermost wireframe
-    icoWire.rotation.x += 0.008;
-    icoWire.rotation.y += 0.012;
+    icoWire.rotation.x += isThinking ? 0.024 : 0.008;
+    icoWire.rotation.y += isThinking ? 0.032 : 0.012;
 
-    // Core pulse — dramatic surges but mostly transparent
-    const wave1 = Math.sin(t * 1.2);
+    // Voice-modulated core pulse & audio amplitude sync
+    const wave1 = Math.sin(t * (isThinking ? 4.0 : 1.2));
     const wave3 = Math.pow(Math.max(0, Math.sin(t * 0.4)), 5); // rare big surge
     const wave4 = Math.pow(Math.max(0, Math.sin(t * 0.7 + 2)), 8); // mega surge
     const fadeOut = Math.pow(Math.max(0, Math.sin(t * 0.25)), 3); // periodic full transparency
     const surge = wave3 * 1.5 + wave4 * 2.0;
-    const coreScale = 1 + surge + Math.sin(t * 5) * 0.05;
+
+    // Audio reactivity when speaking or listening
+    const audioBoost = isSpeaking
+      ? currentAudioLevel * 2.6
+      : isListening
+        ? currentAudioLevel * 1.4
+        : 0;
+
+    const thinkingJitter = isThinking ? Math.sin(t * 14) * 0.18 : 0;
+    const coreScale = 1 + surge + Math.sin(t * 5) * 0.05 + audioBoost + thinkingJitter;
     coreSphere.scale.setScalar(coreScale);
-    // Opacity: mostly very low (0-0.15), sometimes fully transparent, brief bright on surge
-    const coreOpacity = Math.max(
+
+    // Opacity: responsive to speech and orb states
+    const baseCoreOpacity = Math.max(
       0,
       (0.08 + wave1 * 0.05 + surge * 0.2) * (1 - fadeOut * 0.95),
     );
-    coreSphereMat.opacity = Math.min(0.6, coreOpacity);
-    glowSphere.scale.setScalar(1 + surge * 0.8);
-    glowSphereMat.opacity = Math.max(0, (0.03 + surge * 0.08) * (1 - fadeOut * 0.9));
-    // Icosahedron wireframe stays visible even when glow fades
-    icoWire.scale.setScalar(1 + surge * 0.6);
-    icoWireMat.opacity = Math.min(1, 0.5 + surge * 0.4);
+    const coreOpacity = isSpeaking
+      ? Math.min(0.9, baseCoreOpacity + audioBoost * 0.45)
+      : isThinking
+        ? 0.35 + Math.sin(t * 8) * 0.15
+        : baseCoreOpacity;
+
+    coreSphereMat.opacity = Math.min(0.85, coreOpacity);
+    glowSphere.scale.setScalar(1 + surge * 0.8 + audioBoost * 0.6);
+    glowSphereMat.opacity = Math.max(0, (0.03 + surge * 0.08 + audioBoost * 0.2) * (1 - fadeOut * 0.9));
+
+    // Icosahedron wireframe stays visible
+    icoWire.scale.setScalar(1 + surge * 0.6 + audioBoost * 0.4);
+    icoWireMat.opacity = Math.min(1, 0.5 + surge * 0.4 + (isSpeaking ? 0.3 : 0));
 
     // Debris orbits
     debris.forEach((d) => {
@@ -802,11 +848,17 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
       });
     }
 
-    // Bloom pulse
-    bloom.strength = 1.6 + Math.sin(t * 0.8) * 0.3;
+    // Bloom pulse & audio boost
+    const baseBloom = 1.6 + Math.sin(t * 0.8) * 0.3;
+    bloom.strength = isSpeaking
+      ? baseBloom + currentAudioLevel * 1.5
+      : isThinking
+        ? baseBloom + 0.5
+        : baseBloom;
 
-    // Update chromatic aberration time
+    // Update chromatic aberration time & error flare
     chromaticPass.uniforms.uTime.value = t;
+    chromaticPass.uniforms.uIntensity.value = isError ? 0.008 : 0.003;
 
     controls.update();
     composer.render();
@@ -853,6 +905,8 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
     zoomIn: () => zoomBy(0.65),
     zoomOut: () => zoomBy(1.55),
     resetView,
+    setVoiceState,
+    setAudioLevel,
     dispose,
   };
 }

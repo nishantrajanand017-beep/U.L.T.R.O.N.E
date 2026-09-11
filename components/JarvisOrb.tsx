@@ -5,15 +5,9 @@ import { createOrbScene, type OrbSceneApi } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
 import ChatPanel from "@/components/ChatPanel";
 import VoiceMode from "@/components/VoiceMode";
-import { createClient } from "@/lib/supabase/client";
+import SettingsModal from "@/components/SettingsModal";
 
 type CameraState = "off" | "starting" | "on" | "error";
-
-interface UserProfile {
-  name: string;
-  email: string;
-  avatarUrl?: string;
-}
 
 const MODE_LABEL: Record<TrackerStatus["mode"], string> = {
   idle: "STANDBY",
@@ -31,9 +25,9 @@ export default function JarvisOrb() {
   const [camera, setCamera] = useState<CameraState>("off");
   const [chatOpen, setChatOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
   const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -46,28 +40,6 @@ export default function JarvisOrb() {
       scene.dispose();
       sceneRef.current = null;
     };
-  }, []);
-
-  // Fetch Supabase user profile
-  useEffect(() => {
-    try {
-      const supabase = createClient();
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        if (user) {
-          const name =
-            user.user_metadata?.full_name ||
-            user.user_metadata?.name ||
-            user.email?.split("@")[0] ||
-            "OPERATOR";
-          const email = user.email || "";
-          const avatarUrl =
-            user.user_metadata?.avatar_url || user.user_metadata?.picture;
-          setUser({ name, email, avatarUrl });
-        }
-      });
-    } catch (e) {
-      console.warn("[JarvisOrb] Supabase auth check error:", e);
-    }
   }, []);
 
   const stopGestures = useCallback(() => {
@@ -147,6 +119,10 @@ export default function JarvisOrb() {
         case "V":
           setVoiceOpen((prev) => !prev);
           break;
+        case "s":
+        case "S":
+          setSettingsOpen((prev) => !prev);
+          break;
       }
     };
     window.addEventListener("keydown", onKey);
@@ -163,22 +139,7 @@ export default function JarvisOrb() {
       <div className="overlay-grain" />
       <div className="overlay-scanlines" />
 
-      <div className="hud hud-title">
-        <div>U.L.T.R.O.N.</div>
-        {user && (
-          <div className="hud-operator-tag">
-            {user.avatarUrl && (
-              <img
-                src={user.avatarUrl}
-                alt=""
-                className="hud-operator-avatar"
-                referrerPolicy="no-referrer"
-              />
-            )}
-            <span>OPERATOR // {user.name.toUpperCase()}</span>
-          </div>
-        )}
-      </div>
+      <div className="hud hud-title">U.L.T.R.O.N.</div>
 
       <div className="hud hud-hint">
         <div>
@@ -192,6 +153,7 @@ export default function JarvisOrb() {
           </div>
         ) : (
           <div>
+            <span className="key">S</span> settings&nbsp;&nbsp;
             <span className="key">V</span> voice&nbsp;&nbsp;
             <span className="key">C</span> chat&nbsp;&nbsp;
             <span className="key">G</span> hand gestures&nbsp;&nbsp;
@@ -202,7 +164,18 @@ export default function JarvisOrb() {
       </div>
 
       {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
-      {voiceOpen && <VoiceMode onClose={() => setVoiceOpen(false)} />}
+      {voiceOpen && (
+        <VoiceMode
+          onClose={() => {
+            sceneRef.current?.setVoiceState("IDLE");
+            sceneRef.current?.setAudioLevel(0);
+            setVoiceOpen(false);
+          }}
+          onStateChange={(s) => sceneRef.current?.setVoiceState(s)}
+          onAudioLevel={(l) => sceneRef.current?.setAudioLevel(l)}
+        />
+      )}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       <div className="hud hud-controls">
         <div className={`camera-panel${cameraOn ? " visible" : ""}`}>
@@ -221,6 +194,16 @@ export default function JarvisOrb() {
         <div className="hud-row">
           <button
             type="button"
+            id="hud-btn-settings"
+            className="hud-btn"
+            aria-pressed={settingsOpen}
+            onClick={() => setSettingsOpen((prev) => !prev)}
+          >
+            {settingsOpen ? "CLOSE SETTINGS" : "SETTINGS"}
+          </button>
+          <button
+            type="button"
+            id="hud-btn-voice"
             className="hud-btn"
             aria-pressed={voiceOpen}
             onClick={() => setVoiceOpen((prev) => !prev)}
@@ -229,6 +212,7 @@ export default function JarvisOrb() {
           </button>
           <button
             type="button"
+            id="hud-btn-chat"
             className="hud-btn"
             aria-pressed={chatOpen}
             onClick={() => setChatOpen((prev) => !prev)}
@@ -246,35 +230,31 @@ export default function JarvisOrb() {
           </button>
         </div>
         <div className="hud-row">
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomIn()} aria-label="Zoom in">
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => sceneRef.current?.zoomIn()}
+            aria-label="Zoom in"
+          >
             +
-          </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.zoomOut()} aria-label="Zoom out">
-            −
-          </button>
-          <button type="button" className="hud-btn" onClick={() => sceneRef.current?.resetView()}>
-            RESET
           </button>
           <button
             type="button"
-            className="hud-btn hud-btn-logout"
-            onClick={async () => {
-              try {
-                const supabase = createClient();
-                await supabase.auth.signOut();
-              } catch (e) {
-                console.warn("Logout error:", e);
-              }
-              window.location.href = "/login";
-            }}
-            title="Sign out of ULTRON"
-            aria-label="Sign out"
+            className="hud-btn"
+            onClick={() => sceneRef.current?.zoomOut()}
+            aria-label="Zoom out"
           >
-            LOGOUT
+            −
+          </button>
+          <button
+            type="button"
+            className="hud-btn"
+            onClick={() => sceneRef.current?.resetView()}
+          >
+            RESET
           </button>
         </div>
       </div>
     </>
   );
 }
-

@@ -1,5 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
+import { resolveUserSession, attachSessionCookie } from "@/lib/auth/session";
+import { getGeminiClientForUser, getGeminiModel } from "@/lib/geminiService";
+import { updateUserKeyStatus } from "@/lib/db/userApiKeyStore";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -27,27 +29,32 @@ function isTransientError(err: unknown): boolean {
 
 export async function POST(request: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY?.trim();
-    if (!apiKey) {
-      return NextResponse.json(
+    const { userId, isNew } = resolveUserSession(request);
+    const { ai, source } = await getGeminiClientForUser(userId);
+
+    if (!ai) {
+      const resp = NextResponse.json(
         {
           error:
-            "GEMINI_API_KEY is not configured on the server. Please add your API key to .env.local and restart the server.",
+            "No Gemini API key configured. Please configure your own Gemini API key in ULTRON Settings (press 'S' or click SETTINGS).",
         },
-        { status: 500 }
+        { status: 401 }
       );
+      if (isNew) attachSessionCookie(resp, userId);
+      return resp;
     }
 
     const body = await request.json().catch(() => null);
     if (!body || typeof body.message !== "string" || !body.message.trim()) {
-      return NextResponse.json(
+      const resp = NextResponse.json(
         { error: "Invalid request: 'message' must be a non-empty string." },
         { status: 400 }
       );
+      if (isNew) attachSessionCookie(resp, userId);
+      return resp;
     }
 
     const prompt = body.message.trim();
-    const ai = new GoogleGenAI({ apiKey });
 
     // Build contents with conversation history if provided
     let contentsPayload:
@@ -80,9 +87,9 @@ export async function POST(request: Request) {
       }
     }
 
-    const primaryModel = process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
+    const primaryModel = getGeminiModel();
     const fallbackModels = [
-      "gemini-3.6-flash",
+      primaryModel,
       "gemini-2.5-flash",
       "gemini-2.0-flash",
       "gemini-1.5-flash",
@@ -126,18 +133,27 @@ export async function POST(request: Request) {
           ).toLowerCase();
           const isAuthError =
             errMsg.includes("api_key_invalid") ||
+            errMsg.includes("api key not valid") ||
             errMsg.includes("unauthenticated") ||
             errMsg.includes("permission_denied") ||
             errMsg.includes("invalid api key");
 
           if (isAuthError) {
-            return NextResponse.json(
-              {
-                error:
-                  "Invalid or unauthorized GEMINI_API_KEY. Please verify your API key in .env.local.",
-              },
+            if (source === "user") {
+              await updateUserKeyStatus(userId, "invalid", "Authentication failed");
+            }
+
+            const errorMsg =
+              source === "user"
+                ? "Your configured Gemini API key is invalid or unauthorized. Please update it in Settings."
+                : "Invalid or unauthorized development GEMINI_API_KEY. Please configure your own API key in Settings.";
+
+            const resp = NextResponse.json(
+              { error: errorMsg },
               { status: 401 }
             );
+            if (isNew) attachSessionCookie(resp, userId);
+            return resp;
           }
 
           // Move to next candidate model if transient error or model error
@@ -146,10 +162,13 @@ export async function POST(request: Request) {
       }
 
       if (success && replyText !== null) {
-        return NextResponse.json({
+        const resp = NextResponse.json({
           text: replyText,
           reply: replyText,
+          source,
         });
+        if (isNew) attachSessionCookie(resp, userId);
+        return resp;
       }
     }
 
@@ -157,22 +176,26 @@ export async function POST(request: Request) {
     console.error("Gemini request failed after retries and fallbacks:", lastError);
 
     if (isTransientError(lastError)) {
-      return NextResponse.json(
+      const resp = NextResponse.json(
         {
           error:
             "Gemini is temporarily busy. Please try again in a few seconds.",
         },
         { status: 503 }
       );
+      if (isNew) attachSessionCookie(resp, userId);
+      return resp;
     }
 
-    return NextResponse.json(
+    const resp = NextResponse.json(
       {
         error:
           "Unable to process request with Gemini. Please try again shortly.",
       },
       { status: 500 }
     );
+    if (isNew) attachSessionCookie(resp, userId);
+    return resp;
   } catch (err: unknown) {
     console.error("Unexpected server error in /api/chat:", err);
     return NextResponse.json(
