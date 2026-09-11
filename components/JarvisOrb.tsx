@@ -5,8 +5,15 @@ import { createOrbScene, type OrbSceneApi } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
 import ChatPanel from "@/components/ChatPanel";
 import VoiceMode from "@/components/VoiceMode";
+import { createClient } from "@/lib/supabase/client";
 
 type CameraState = "off" | "starting" | "on" | "error";
+
+interface UserProfile {
+  name: string;
+  email: string;
+  avatarUrl?: string;
+}
 
 const MODE_LABEL: Record<TrackerStatus["mode"], string> = {
   idle: "STANDBY",
@@ -26,6 +33,7 @@ export default function JarvisOrb() {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -38,6 +46,28 @@ export default function JarvisOrb() {
       scene.dispose();
       sceneRef.current = null;
     };
+  }, []);
+
+  // Fetch Supabase user profile
+  useEffect(() => {
+    try {
+      const supabase = createClient();
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          const name =
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.email?.split("@")[0] ||
+            "OPERATOR";
+          const email = user.email || "";
+          const avatarUrl =
+            user.user_metadata?.avatar_url || user.user_metadata?.picture;
+          setUser({ name, email, avatarUrl });
+        }
+      });
+    } catch (e) {
+      console.warn("[JarvisOrb] Supabase auth check error:", e);
+    }
   }, []);
 
   const stopGestures = useCallback(() => {
@@ -133,7 +163,22 @@ export default function JarvisOrb() {
       <div className="overlay-grain" />
       <div className="overlay-scanlines" />
 
-      <div className="hud hud-title">U.L.T.R.O.N.</div>
+      <div className="hud hud-title">
+        <div>U.L.T.R.O.N.</div>
+        {user && (
+          <div className="hud-operator-tag">
+            {user.avatarUrl && (
+              <img
+                src={user.avatarUrl}
+                alt=""
+                className="hud-operator-avatar"
+                referrerPolicy="no-referrer"
+              />
+            )}
+            <span>OPERATOR // {user.name.toUpperCase()}</span>
+          </div>
+        )}
+      </div>
 
       <div className="hud hud-hint">
         <div>
@@ -210,8 +255,26 @@ export default function JarvisOrb() {
           <button type="button" className="hud-btn" onClick={() => sceneRef.current?.resetView()}>
             RESET
           </button>
+          <button
+            type="button"
+            className="hud-btn hud-btn-logout"
+            onClick={async () => {
+              try {
+                const supabase = createClient();
+                await supabase.auth.signOut();
+              } catch (e) {
+                console.warn("Logout error:", e);
+              }
+              window.location.href = "/login";
+            }}
+            title="Sign out of ULTRON"
+            aria-label="Sign out"
+          >
+            LOGOUT
+          </button>
         </div>
       </div>
     </>
   );
 }
+
