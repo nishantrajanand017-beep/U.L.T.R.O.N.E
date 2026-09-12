@@ -24,7 +24,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var preferences: DevicePreferences
     private val apiClient = UltronApiClient()
-    private val realtimeManager = UltronRealtimeManager()
+    private lateinit var realtimeManager: UltronRealtimeManager
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,7 +33,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         preferences = DevicePreferences(this)
-        realtimeManager.appContext = applicationContext
+        realtimeManager = UltronRealtimeManager.getInstance(applicationContext)
 
         setupUI()
         setupRealtimeListener()
@@ -64,15 +64,22 @@ class MainActivity : AppCompatActivity() {
         binding.btnUnpair.setOnClickListener {
             performUnpair()
         }
+
+        binding.btnSyncApps.setOnClickListener {
+            val apps = realtimeManager.discoverInstalledApps()
+            realtimeManager.broadcastAppCatalog()
+            binding.tvDiscoveredApps.text = "Discovered Apps: ${apps.size} (Launcher Catalog)"
+            showMessage("Discovered ${apps.size} installed apps. Catalog synced with ULTRON.")
+        }
     }
 
     private fun setupRealtimeListener() {
-        realtimeManager.onStateChanged = { state, message, lastSeen ->
+        realtimeManager.addStateListener("MainActivity") { state, message, lastSeen ->
             runOnUiThread {
                 updateConnectionState(state, message, lastSeen)
             }
         }
-        realtimeManager.onDeviceCommandProcessed = { cmdId, status, result ->
+        realtimeManager.addCommandProcessedListener("MainActivity") { cmdId, status, result ->
             runOnUiThread {
                 binding.tvStatusMessage.visibility = View.VISIBLE
                 val type = result?.optString("type") ?: ""
@@ -81,6 +88,7 @@ class MainActivity : AppCompatActivity() {
                     "PONG" -> "PONG acknowledged"
                     "APP_LAUNCHED" -> "Launched $appId"
                     "APP_NOT_INSTALLED" -> "$appId not installed"
+                    "CATALOG_SYNCED" -> "App catalog synced (${result?.optInt("count") ?: 0} apps)"
                     else -> "$status $type"
                 }
                 binding.tvStatusMessage.text = "Command $cmdId: $actionDesc"
@@ -92,9 +100,13 @@ class MainActivity : AppCompatActivity() {
         if (preferences.isPaired) {
             binding.layoutPairingForm.visibility = View.GONE
             binding.layoutPairedActions.visibility = View.VISIBLE
+            binding.btnSyncApps.visibility = View.VISIBLE
 
             binding.tvDeviceInfo.text = "Device: ${preferences.deviceName} (${preferences.deviceId})"
             binding.tvAccountId.text = "Account ID: ${preferences.userId ?: "--"}"
+
+            val appsCount = realtimeManager.getDiscoveredApps().size
+            binding.tvDiscoveredApps.text = "Discovered Apps: $appsCount (Launcher Catalog)"
 
             // 1. Independent background REST Heartbeat Service (runs every 30s)
             HeartbeatService.start(this)
@@ -107,11 +119,14 @@ class MainActivity : AppCompatActivity() {
 
             binding.layoutPairingForm.visibility = View.VISIBLE
             binding.layoutPairedActions.visibility = View.GONE
+            binding.btnSyncApps.visibility = View.GONE
 
+            binding.viewStatusDot.setCardBackgroundColor(getColor(R.color.ultron_subtext))
             binding.tvConnectionStatus.text = getString(R.string.status_unpaired)
             binding.tvConnectionStatus.setTextColor(getColor(R.color.ultron_subtext))
             binding.tvDeviceInfo.text = "Device: Not Paired"
             binding.tvAccountId.text = "Account ID: --"
+            binding.tvDiscoveredApps.text = "Discovered Apps: --"
             binding.tvHeartbeatInfo.text = "Last Heartbeat: Never"
         }
     }
@@ -196,6 +211,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateConnectionState(state: ConnectionState, message: String?, lastSeen: String?) {
         when (state) {
             ConnectionState.CONNECTED -> {
+                binding.viewStatusDot.setCardBackgroundColor(getColor(R.color.ultron_green))
                 binding.tvConnectionStatus.text = getString(R.string.status_connected)
                 binding.tvConnectionStatus.setTextColor(getColor(R.color.ultron_green))
                 val timeStr = if (!lastSeen.isNullOrEmpty()) {
@@ -204,16 +220,21 @@ class MainActivity : AppCompatActivity() {
                     SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 }
                 binding.tvHeartbeatInfo.text = "Last Heartbeat: $timeStr"
+                val appsCount = realtimeManager.getDiscoveredApps().size
+                binding.tvDiscoveredApps.text = "Discovered Apps: $appsCount (Launcher Catalog)"
             }
             ConnectionState.CONNECTING -> {
+                binding.viewStatusDot.setCardBackgroundColor(getColor(R.color.ultron_amber))
                 binding.tvConnectionStatus.text = getString(R.string.status_connecting)
                 binding.tvConnectionStatus.setTextColor(getColor(R.color.ultron_amber))
             }
             ConnectionState.OFFLINE -> {
+                binding.viewStatusDot.setCardBackgroundColor(getColor(R.color.ultron_red))
                 binding.tvConnectionStatus.text = getString(R.string.status_offline)
                 binding.tvConnectionStatus.setTextColor(getColor(R.color.ultron_red))
             }
             ConnectionState.STANDBY -> {
+                binding.viewStatusDot.setCardBackgroundColor(getColor(R.color.ultron_subtext))
                 binding.tvConnectionStatus.text = getString(R.string.status_unpaired)
                 binding.tvConnectionStatus.setTextColor(getColor(R.color.ultron_subtext))
             }
@@ -270,7 +291,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        realtimeManager.disconnect()
+        realtimeManager.removeStateListener("MainActivity")
+        realtimeManager.removeCommandProcessedListener("MainActivity")
+        // Do not disconnect realtime link if paired; HeartbeatService continues background companion connectivity
+        if (!preferences.isPaired) {
+            realtimeManager.disconnect()
+        }
         super.onDestroy()
     }
 }

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg viewBox="0 0 512 512" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Radial Gradient -->
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0A1428" />
+      <stop offset="60%" stop-color="#050A14" />
+      <stop offset="100%" stop-color="#020408" />
+    </radialGradient>
+
+    <!-- Cyan Energy Gradient -->
+    <linearGradient id="cyanEnergy" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F0FF" />
+      <stop offset="100%" stop-color="#0080FF" />
+    </linearGradient>
+
+    <!-- Amber Gold Accent Gradient -->
+    <linearGradient id="amberAccent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFC700" />
+      <stop offset="100%" stop-color="#FF7A00" />
+    </linearGradient>
+
+    <!-- Core Singularity Radial Gradient -->
+    <radialGradient id="coreSingularity" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="25%" stop-color="#99F6FF" />
+      <stop offset="55%" stop-color="#00F0FF" stop-opacity="0.9" />
+      <stop offset="85%" stop-color="#FF9900" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#00F0FF" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Intense Bloom Filter -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Dark Shield Base -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGlow)" />
+  <rect width="508" height="508" x="2" y="2" rx="110" fill="none" stroke="#152744" stroke-width="2" opacity="0.6" />
+
+  <!-- Outer Background Tech Ring -->
+  <circle cx="256" cy="256" r="218" fill="none" stroke="#0C1B33" stroke-width="1.5" stroke-dasharray="8 6" />
+
+  <!-- Segmented Outer Cyan HUD Ring -->
+  <circle cx="256" cy="256" r="196" fill="none" stroke="url(#cyanEnergy)" stroke-width="4.5"
+          stroke-dasharray="130 24 90 24 130 24 90 24" filter="url(#glow)" />
+
+  <!-- Precision Dial Ticks -->
+  <g stroke="#00E5FF" stroke-width="2" opacity="0.65">
+    <line x1="256" y1="42" x2="256" y2="58" />
+    <line x1="256" y1="454" x2="256" y2="470" />
+    <line x1="42" y1="256" x2="58" y2="256" />
+    <line x1="454" y1="256" x2="470" y2="256" />
+    <line x1="105" y1="105" x2="116" y2="116" />
+    <line x1="407" y1="105" x2="396" y2="116" />
+    <line x1="105" y1="407" x2="116" y2="396" />
+    <line x1="407" y1="407" x2="396" y2="396" />
+  </g>
+
+  <!-- Mid Gold / Amber Containment Brackets -->
+  <circle cx="256" cy="256" r="158" fill="none" stroke="url(#amberAccent)" stroke-width="5"
+          stroke-dasharray="80 44 80 44 80 44 80 44" stroke-linecap="round" filter="url(#glow)" />
+
+  <!-- Inner Cyan Hex / Turbine Nodes -->
+  <g stroke="url(#cyanEnergy)" stroke-width="2.5" fill="none" opacity="0.8">
+    <circle cx="256" cy="256" r="118" stroke-dasharray="5 5" />
+    <!-- 4 Cardinal Inner Arrowheads -->
+    <path d="M 256 126 L 250 140 L 262 140 Z" fill="#00F0FF" />
+    <path d="M 256 386 L 250 372 L 262 372 Z" fill="#00F0FF" />
+    <path d="M 126 256 L 140 250 L 140 262 Z" fill="#00F0FF" />
+    <path d="M 386 256 L 372 250 L 372 262 Z" fill="#00F0FF" />
+  </g>
+
+  <!-- Central Arc Reactor Nucleus Core -->
+  <circle cx="256" cy="256" r="88" fill="url(#coreSingularity)" filter="url(#glow)" />
+  <circle cx="256" cy="256" r="54" fill="none" stroke="#FFFFFF" stroke-width="2" opacity="0.85" filter="url(#glow)" />
+  <circle cx="256" cy="256" r="26" fill="#FFFFFF" filter="url(#glow)" />
+
+  <!-- Subtle Diamond Precision Reticle -->
+  <polygon points="256,236 276,256 256,276 236,256" fill="none" stroke="#00F0FF" stroke-width="1.5" opacity="0.75" />
+</svg>

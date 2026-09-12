@@ -28,22 +28,28 @@ class HeartbeatService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var preferences: DevicePreferences
     private val apiClient = UltronApiClient()
-    private val realtimeManager = UltronRealtimeManager()
+    private lateinit var realtimeManager: UltronRealtimeManager
     private var restHeartbeatJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
         preferences = DevicePreferences(this)
+        realtimeManager = UltronRealtimeManager.getInstance(applicationContext)
         createNotificationChannel()
 
         val notification = createNotification("ULTRON Companion Active", "Maintaining cloud companion link")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        realtimeManager.onStateChanged = { state, msg, lastSeen ->
+        realtimeManager.addStateListener("HeartbeatService") { state, msg, lastSeen ->
             val statusText = when (state) {
                 ConnectionState.CONNECTED -> "Connected // Link active"
                 ConnectionState.CONNECTING -> "Connecting to Supabase Realtime…"
@@ -125,6 +131,7 @@ class HeartbeatService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_DISCONNECT) {
             restHeartbeatJob?.cancel()
+            realtimeManager.removeStateListener("HeartbeatService")
             realtimeManager.disconnect()
             stopSelf()
             return START_NOT_STICKY
@@ -132,8 +139,15 @@ class HeartbeatService : Service() {
         return START_STICKY
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        super.onTimeout(startId, fgsType)
+        android.util.Log.w("ULTRON_HEARTBEAT_SVC", "FGS onTimeout reached for type $fgsType (startId: $startId). Stopping service gracefully per Android 15 contract.")
+        stopSelf()
+    }
+
     override fun onDestroy() {
         restHeartbeatJob?.cancel()
+        realtimeManager.removeStateListener("HeartbeatService")
         realtimeManager.disconnect()
         serviceScope.cancel()
         super.onDestroy()

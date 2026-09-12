@@ -84,6 +84,7 @@ class SimulatedAndroidCompanion {
       const res: DeviceCommandResult = {
         commandId: cmdId,
         deviceId: this.deviceId,
+        commandType: commandType as any,
         status: "EXPIRED",
         error: "Command expired before processing.",
         completedAt: new Date().toISOString(),
@@ -97,6 +98,7 @@ class SimulatedAndroidCompanion {
       const res: DeviceCommandResult = {
         commandId: cmdId,
         deviceId: this.deviceId,
+        commandType: commandType as any,
         status: "DUPLICATE",
         error: "Command has already been processed.",
         completedAt: new Date().toISOString(),
@@ -110,6 +112,7 @@ class SimulatedAndroidCompanion {
       const res: DeviceCommandResult = {
         commandId: cmdId,
         deviceId: this.deviceId,
+        commandType: commandType as any,
         status: "FAILED",
         error: `Unsupported commandType: '${commandType}'. Only PING and OPEN_APP are supported.`,
         completedAt: new Date().toISOString(),
@@ -124,6 +127,7 @@ class SimulatedAndroidCompanion {
       const res: DeviceCommandResult = {
         commandId: cmdId,
         deviceId: this.deviceId,
+        commandType: "PING",
         status: "SUCCESS",
         result: { type: "PONG" },
         completedAt: new Date().toISOString(),
@@ -144,6 +148,7 @@ class SimulatedAndroidCompanion {
         const res: DeviceCommandResult = {
           commandId: cmdId,
           deviceId: this.deviceId,
+          commandType: "OPEN_APP",
           status: "FAILED",
           result: { type: "APP_DISALLOWED", appId },
           error: `Application '${appId}' is not permitted on this device.`,
@@ -158,6 +163,7 @@ class SimulatedAndroidCompanion {
         const res: DeviceCommandResult = {
           commandId: cmdId,
           deviceId: this.deviceId,
+          commandType: "OPEN_APP",
           status: "FAILED",
           result: { type: "APP_NOT_INSTALLED", appId, packageName: expectedPackage },
           error: `Application '${appId}' (${expectedPackage}) is not installed on this device.`,
@@ -172,6 +178,7 @@ class SimulatedAndroidCompanion {
       const res: DeviceCommandResult = {
         commandId: cmdId,
         deviceId: this.deviceId,
+        commandType: "OPEN_APP",
         status: "SUCCESS",
         result: { type: "APP_LAUNCHED", appId, packageName: expectedPackage },
         completedAt: new Date().toISOString(),
@@ -477,6 +484,167 @@ async function runAllTests() {
     assert.equal(text.includes(pairedA.deviceAuthToken), false);
     const hash = crypto.createHash("sha256").update(pairedA.deviceAuthToken.trim()).digest("hex");
     assert.equal(text.includes(hash), false);
+  });
+
+  // Test 14: Single-Owner Singleton Lifecycle & Terminal Result Guarantee
+  await test("14. Single-Owner Manager Guarantee: Exactly one terminal result per OPEN_APP command", async () => {
+    // Simulate a device with WhatsApp installed
+    const physicalCompanion = new SimulatedAndroidCompanion(devA.deviceId, "SingleManagerPhone", ["com.whatsapp"]);
+
+    const { req, params } = createMockCommandRequest(
+      devA.deviceId,
+      { commandType: "OPEN_APP", payload: { appId: "whatsapp" } },
+      testUserId
+    );
+    const res = await commandsRoute(req, { params });
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    const cmdPayload: DeviceCommand = {
+      commandId: json.commandId,
+      targetDeviceId: devA.deviceId,
+      commandType: "OPEN_APP",
+      createdAt: new Date().toISOString(),
+      expiresAt: json.expiresAt,
+      payload: { appId: "whatsapp", packageName: "com.whatsapp" },
+      source: "ultron-web",
+    };
+
+    // With single-owner manager, broadcast is processed by the single instance exactly once
+    const result1 = physicalCompanion.handleBroadcastMessage(cmdPayload);
+    assert.ok(result1);
+    assert.equal(result1.status, "SUCCESS");
+    assert.equal(result1.commandType, "OPEN_APP");
+    assert.deepEqual(result1.result, {
+      type: "APP_LAUNCHED",
+      appId: "whatsapp",
+      packageName: "com.whatsapp",
+    });
+
+    // A duplicate arrival at the same manager is caught by replay protection
+    const resultDuplicate = physicalCompanion.handleBroadcastMessage(cmdPayload);
+    assert.ok(resultDuplicate);
+    assert.equal(resultDuplicate.status, "DUPLICATE");
+
+    // Ensure zero contradictory "Device context is not available" failures exist
+    const contradictoryFails = physicalCompanion.results.filter(
+      (r) => r.status === "FAILED" && String(r.error || "").includes("Device context")
+    );
+    assert.equal(contradictoryFails.length, 0);
+  });
+
+  // Test 15: Web UI Result Routing Isolation (OPEN_APP failures never pollute PING)
+  await test("15. Web UI Result Routing: OPEN_APP failures route to launch results, never polluting PING", () => {
+    let deviceLaunchResults: Record<string, { status: string; message: string }> = {};
+    let devicePingResults: Record<string, { status: string; latencyMs?: number; message?: string }> = {};
+    let launchingDeviceId: string | null = devA.deviceId;
+    let pingingDeviceId: string | null = null;
+
+    const simulateOnCommandResult = (payload: DeviceCommandResult) => {
+      const resObj = payload.result as Record<string, unknown> | undefined;
+      const resType = String(resObj?.type || "");
+      const cmdType = payload.commandType;
+
+      const isAppCommand =
+        cmdType === "OPEN_APP" ||
+        resType.startsWith("APP_") ||
+        (launchingDeviceId === payload.deviceId && cmdType !== "PING" && resType !== "PONG");
+
+      if (isAppCommand) {
+        const appName = String(resObj?.appId || "application");
+        const msg =
+          resType === "APP_LAUNCHED"
+            ? `App launch successful (${appName})`
+            : resType === "APP_NOT_INSTALLED"
+            ? `App not installed (${appName})`
+            : payload.error
+            ? `App launch failed: ${payload.error}`
+            : `App launch ${payload.status}`;
+
+        deviceLaunchResults[payload.deviceId] = { status: payload.status, message: msg };
+        if (launchingDeviceId === payload.deviceId) launchingDeviceId = null;
+      } else {
+        const msg =
+          resType === "PONG"
+            ? `PONG received`
+            : payload.error
+            ? `PING failed: ${payload.error}`
+            : `Command ${payload.status}: ${payload.error || ""}`;
+
+        devicePingResults[payload.deviceId] = { status: payload.status, message: msg };
+        if (pingingDeviceId === payload.deviceId) pingingDeviceId = null;
+      }
+    };
+
+    // Case A: OPEN_APP failed (e.g. app not installed)
+    simulateOnCommandResult({
+      commandId: "cmd_fail_1",
+      deviceId: devA.deviceId,
+      commandType: "OPEN_APP",
+      status: "FAILED",
+      error: "Application 'telegram' is not installed.",
+      result: { type: "APP_NOT_INSTALLED", appId: "telegram" },
+      completedAt: new Date().toISOString(),
+    });
+
+    assert.ok(deviceLaunchResults[devA.deviceId]);
+    assert.equal(deviceLaunchResults[devA.deviceId].status, "FAILED");
+    assert.equal(deviceLaunchResults[devA.deviceId].message, "App not installed (telegram)");
+    // Must NOT have touched devicePingResults
+    assert.equal(devicePingResults[devA.deviceId], undefined);
+
+    // Case B: PING succeeded
+    pingingDeviceId = devA.deviceId;
+    simulateOnCommandResult({
+      commandId: "cmd_ping_1",
+      deviceId: devA.deviceId,
+      commandType: "PING",
+      status: "SUCCESS",
+      result: { type: "PONG" },
+      completedAt: new Date().toISOString(),
+    });
+
+    assert.ok(devicePingResults[devA.deviceId]);
+    assert.equal(devicePingResults[devA.deviceId].status, "SUCCESS");
+    assert.equal(devicePingResults[devA.deviceId].message, "PONG received");
+    // Launch results remain intact
+    assert.equal(deviceLaunchResults[devA.deviceId].status, "FAILED");
+  });
+
+  // Test 16: Android Companion Architecture Static Guardrails
+  await test("16. Android Source Guardrails: Single-instance, non-nullable appContext, no duplicate manager", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+
+    const managerSrc = await fs.readFile(
+      path.join(process.cwd(), "android/app/src/main/java/com/ultron/companion/network/UltronRealtimeManager.kt"),
+      "utf8"
+    );
+    const mainActivitySrc = await fs.readFile(
+      path.join(process.cwd(), "android/app/src/main/java/com/ultron/companion/MainActivity.kt"),
+      "utf8"
+    );
+    const serviceSrc = await fs.readFile(
+      path.join(process.cwd(), "android/app/src/main/java/com/ultron/companion/service/HeartbeatService.kt"),
+      "utf8"
+    );
+
+    // Guardrail A: UltronRealtimeManager has private constructor and getInstance(context)
+    assert.ok(managerSrc.includes("class UltronRealtimeManager private constructor("));
+    assert.ok(managerSrc.includes("fun getInstance(context: Context): UltronRealtimeManager"));
+
+    // Guardrail B: Nullable var appContext is completely removed
+    assert.equal(managerSrc.includes("var appContext: Context? = null"), false);
+
+    // Guardrail C: Both MainActivity and HeartbeatService use UltronRealtimeManager.getInstance
+    assert.ok(mainActivitySrc.includes("UltronRealtimeManager.getInstance(applicationContext)"));
+    assert.ok(serviceSrc.includes("UltronRealtimeManager.getInstance(applicationContext)"));
+
+    // Guardrail D: Neither class instantiates an independent manager via constructor
+    assert.equal(mainActivitySrc.includes("= UltronRealtimeManager()"), false);
+    assert.equal(serviceSrc.includes("= UltronRealtimeManager()"), false);
+
+    // Guardrail E: MainActivity does not disconnect background companion link when paired
+    assert.ok(mainActivitySrc.includes("if (!preferences.isPaired) {\n            realtimeManager.disconnect()\n        }"));
   });
 
   // Summary

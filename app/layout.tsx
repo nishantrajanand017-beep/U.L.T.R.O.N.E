@@ -1,9 +1,19 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { DeviceRealtimeProvider } from "@/lib/realtime/DeviceRealtimeContext";
 
 export const metadata: Metadata = {
-  title: "ULTRON Orb UI",
-  description: "An Iron Man-inspired holographic orb built with Three.js and Next.js",
+  title: "U.L.T.R.O.N. — Neural AI Core",
+  description: "An Iron Man-inspired holographic AI companion and neural orb interface",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: [
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
@@ -19,7 +29,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <DeviceRealtimeProvider>{children}</DeviceRealtimeProvider>
+      </body>
     </html>
   );
 }

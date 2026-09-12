@@ -56,3 +56,23 @@ CREATE POLICY "Allow anon devices access"
     TO anon, authenticated, service_role
     USING (true)
     WITH CHECK (true);
+
+-- 4. Device Installed Application Catalogs (Phase 12 Step 3)
+CREATE TABLE IF NOT EXISTS public.ultron_device_catalogs (
+    device_id VARCHAR(64) PRIMARY KEY,
+    catalog JSONB NOT NULL DEFAULT '[]'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ultron_device_catalogs_updated ON public.ultron_device_catalogs (updated_at);
+
+ALTER TABLE public.ultron_device_catalogs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow anon device catalogs" ON public.ultron_device_catalogs;
+CREATE POLICY "Allow anon device catalogs"
+    ON public.ultron_device_catalogs
+    FOR ALL
+    TO anon, authenticated, service_role
+    USING (true)
+    WITH CHECK (true);
+

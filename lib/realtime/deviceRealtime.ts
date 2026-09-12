@@ -50,10 +50,22 @@ export interface DeviceCommand<T = Record<string, unknown>> {
 export interface DeviceCommandResult<T = unknown> {
   commandId: string;
   deviceId: string;
+  commandType?: CommandType;
   status: CommandStatus;
   result?: T;
   error?: string;
   completedAt: string;
+}
+
+export interface DeviceAppCatalogEntry {
+  appId: string;
+  displayName: string;
+}
+
+export interface DeviceAppCatalogPayload {
+  deviceId: string;
+  apps: DeviceAppCatalogEntry[];
+  timestamp?: string | number;
 }
 
 export interface DeviceRealtimeCallbacks {
@@ -61,6 +73,7 @@ export interface DeviceRealtimeCallbacks {
   onHeartbeat?: (payload: DeviceHeartbeatPayload) => void;
   onEvent?: (payload: DeviceEventPayload) => void;
   onCommandResult?: (payload: DeviceCommandResult) => void;
+  onAppCatalog?: (payload: DeviceAppCatalogPayload) => void;
   onConnectionChange?: (status: "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR") => void;
 }
 
@@ -140,6 +153,11 @@ export function subscribeToDeviceChannel(
     .on("broadcast", { event: "device_command_result" }, (event) => {
       if (callbacks.onCommandResult && event.payload) {
         callbacks.onCommandResult(event.payload as DeviceCommandResult);
+      }
+    })
+    .on("broadcast", { event: "device:app_catalog" }, (event) => {
+      if (callbacks.onAppCatalog && event.payload) {
+        callbacks.onAppCatalog(event.payload as DeviceAppCatalogPayload);
       }
     })
     .subscribe((status) => {

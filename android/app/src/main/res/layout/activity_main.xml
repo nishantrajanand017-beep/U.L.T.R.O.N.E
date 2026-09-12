@@ -27,7 +27,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="SECURE HARDWARE BRIDGE · PHASE 11"
+            android:text="SECURE HARDWARE BRIDGE · PHASE 12 STEP 3"
             android:textColor="@color/ultron_subtext"
             android:textSize="11sp"
             android:letterSpacing="0.1" />
@@ -48,14 +48,32 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="DEVICE LINK STATUS"
-                    android:textColor="@color/ultron_amber"
-                    android:textSize="10sp"
-                    android:textStyle="bold"
-                    android:letterSpacing="0.12" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="DEVICE LINK STATUS"
+                        android:textColor="@color/ultron_amber"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.12" />
+
+                    <!-- Circular Status Indicator -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/viewStatusDot"
+                        android:layout_width="12dp"
+                        android:layout_height="12dp"
+                        app:cardCornerRadius="6dp"
+                        app:cardBackgroundColor="@color/ultron_subtext"
+                        app:cardElevation="0dp"
+                        app:strokeWidth="0dp" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/tvConnectionStatus"
@@ -92,6 +110,26 @@
                     android:textColor="@color/ultron_subtext"
                     android:textSize="11sp" />
 
+                <!-- Discovered Launcher Catalog Count -->
+                <TextView
+                    android:id="@+id/tvDiscoveredApps"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Discovered Apps: --"
+                    android:textColor="@color/ultron_green"
+                    android:textSize="11sp" />
+
+                <!-- Service Persistence Status -->
+                <TextView
+                    android:id="@+id/tvServiceStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Background FGS: connectedDevice|dataSync"
+                    android:textColor="@color/ultron_subtext"
+                    android:textSize="11sp" />
+
                 <TextView
                     android:id="@+id/tvHeartbeatInfo"
                     android:layout_width="wrap_content"
@@ -100,6 +138,22 @@
                     android:text="Last Heartbeat: Never"
                     android:textColor="@color/ultron_subtext"
                     android:textSize="11sp" />
+
+                <!-- Sync Catalog Action -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSyncApps"
+                    android:layout_width="match_parent"
+                    android:layout_height="36dp"
+                    android:layout_marginTop="12dp"
+                    android:backgroundTint="@color/ultron_card"
+                    android:text="↻ SYNC INSTALLED APPS"
+                    android:textColor="@color/ultron_cyan"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.08"
+                    android:visibility="gone"
+                    app:strokeColor="@color/ultron_cyan"
+                    app:strokeWidth="1dp"
+                    app:cornerRadius="4dp" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

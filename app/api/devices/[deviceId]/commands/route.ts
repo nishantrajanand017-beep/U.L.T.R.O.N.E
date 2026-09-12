@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getUserIdFromRequest } from "@/lib/auth/session";
 import { listUserDevices, getSupabase } from "@/lib/db/deviceStore";
 import { resolveApprovedApp } from "@/lib/constants/appAllowlist";
+import { findInDeviceCatalog } from "@/lib/db/deviceCatalogStore";
 import type { DeviceCommand } from "@/lib/realtime/deviceRealtime";
 
 export async function POST(
@@ -80,19 +81,25 @@ export async function POST(
       }
 
       const approvedApp = resolveApprovedApp(rawAppId);
-      if (!approvedApp) {
+      const catalogApp = !approvedApp ? await findInDeviceCatalog(deviceId, rawAppId) : null;
+
+      if (!approvedApp && !catalogApp) {
         return NextResponse.json(
           {
-            error: `Application '${rawAppId}' is not on the approved application allowlist.`,
+            error: `Application '${rawAppId}' is not on the approved application allowlist or discovered catalog for this device.`,
           },
           { status: 400 }
         );
       }
 
-      // Explicitly inject server-verified package name; ignore any client-supplied packageName
+      // Explicitly inject server-verified package name or catalog identifier; ignore client package tampering
       commandPayload = {
-        appId: approvedApp.appId,
-        packageName: approvedApp.packageName,
+        appId: approvedApp ? approvedApp.appId : catalogApp!.appId,
+        ...(approvedApp
+          ? { packageName: approvedApp.packageName }
+          : catalogApp?.packageName
+          ? { packageName: catalogApp.packageName }
+          : {}),
       };
     } else {
       commandPayload = (reqBody.payload && typeof reqBody.payload === "object"

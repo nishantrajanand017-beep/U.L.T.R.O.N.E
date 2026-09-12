@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { KeyStatus } from "@/lib/db/userApiKeyStore";
-import { subscribeToDeviceChannel } from "@/lib/realtime/deviceRealtime";
+import { useDeviceRealtime } from "@/lib/realtime/DeviceRealtimeContext";
 import { getApprovedAppsList, type AllowedAppConfig } from "@/lib/constants/appAllowlist";
 
 interface SettingsModalProps {
@@ -26,17 +26,6 @@ interface ElevenLabsStatusResponse {
   voiceId: string;
   voiceName: string;
   modelId: string;
-}
-
-interface DeviceInfo {
-  deviceId: string;
-  deviceName: string;
-  platform: string;
-  appVersion: string;
-  connectionStatus: "connected" | "offline";
-  createdAt: string;
-  lastSeenAt: string;
-  pairedAt: string;
 }
 
 interface PairingSessionInfo {
@@ -74,8 +63,6 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const [showKey, setShowKey] = useState(false);
   const [statusData, setStatusData] = useState<ApiKeyStatusResponse | null>(null);
   const [elevenLabsData, setElevenLabsData] = useState<ElevenLabsStatusResponse | null>(null);
-  const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activePairing, setActivePairing] = useState<PairingSessionInfo | null>(null);
   const [isGeneratingPairing, setIsGeneratingPairing] = useState(false);
   const [unpairingDeviceId, setUnpairingDeviceId] = useState<string | null>(null);
@@ -97,14 +84,24 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     type: "success" | "error" | "info";
     message: string;
   } | null>(null);
-  const [isLoadingDevices, setIsLoadingDevices] = useState(true);
-  const [pingingDeviceId, setPingingDeviceId] = useState<string | null>(null);
-  const [devicePingResults, setDevicePingResults] = useState<Record<string, { status: string; latencyMs?: number; message?: string }>>({});
-  const [launchingDeviceId, setLaunchingDeviceId] = useState<string | null>(null);
   const [selectedAppPerDevice, setSelectedAppPerDevice] = useState<Record<string, string>>({});
-  const [deviceLaunchResults, setDeviceLaunchResults] = useState<Record<string, { status: string; message: string }>>({});
-  const pingStartTimesRef = useRef<Record<string, number>>({});
   const approvedApps = useRef<AllowedAppConfig[]>(getApprovedAppsList()).current;
+
+  // Global persistent device realtime hook
+  const {
+    devices,
+    isLoadingDevices,
+    appCatalogs,
+    pingResults: devicePingResults,
+    launchResults: deviceLaunchResults,
+    pingingDeviceId,
+    launchingDeviceId,
+    fetchDevices,
+    pingDevice: handlePingDevice,
+    launchApp: handleLaunchAppDirect,
+    refreshAppCatalog,
+    unpairDevice: unpairDeviceDirect,
+  } = useDeviceRealtime();
 
   // Fetch current API key & ElevenLabs status
   const fetchStatus = useCallback(async () => {
@@ -130,126 +127,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     }
   }, []);
 
-  // Fetch authenticated user's paired devices
-  const fetchDevices = useCallback(async () => {
-    try {
-      const res = await fetch("/api/devices");
-      if (res.ok) {
-        const data = await res.json();
-        setDevices(data.devices || []);
-        if (data.userId) {
-          setCurrentUserId(data.userId);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to load devices:", err);
-    } finally {
-      setIsLoadingDevices(false);
-    }
-  }, []);
-
   useEffect(() => {
     void fetchStatus();
-    void fetchDevices();
-  }, [fetchDevices, fetchStatus]);
+  }, [fetchStatus]);
 
-  // Real-time companion status link via Supabase Realtime channel
   useEffect(() => {
-    if (!currentUserId || activeTab !== "devices") return;
-
-    const sub = subscribeToDeviceChannel(currentUserId, {
-      onStatusChange: (payload) => {
-        setDevices((prev) =>
-          prev.map((d) =>
-            d.deviceId === payload.deviceId
-              ? {
-                  ...d,
-                  connectionStatus: payload.status,
-                  lastSeenAt: payload.timestamp || new Date().toISOString(),
-                }
-              : d
-          )
-        );
-      },
-      onHeartbeat: (payload) => {
-        setDevices((prev) =>
-          prev.map((d) =>
-            d.deviceId === payload.deviceId
-              ? {
-                  ...d,
-                  connectionStatus: "connected",
-                  lastSeenAt:
-                    typeof payload.timestamp === "number"
-                      ? new Date(payload.timestamp).toISOString()
-                      : payload.timestamp || new Date().toISOString(),
-                }
-              : d
-          )
-        );
-      },
-      onCommandResult: (payload) => {
-        const start = pingStartTimesRef.current[payload.deviceId];
-        const latencyMs = start ? Date.now() - start : undefined;
-        const resObj = payload.result as Record<string, unknown> | undefined;
-        const resType = String(resObj?.type || "");
-
-        if (resType === "PONG") {
-          setDevicePingResults((prev) => ({
-            ...prev,
-            [payload.deviceId]: {
-              status: payload.status,
-              latencyMs,
-              message: `PONG received${latencyMs !== undefined ? ` in ${latencyMs}ms` : ""}`,
-            },
-          }));
-          setPingingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
-        } else if (resType === "APP_LAUNCHED" || resType === "APP_NOT_INSTALLED" || resType === "APP_DISALLOWED" || resType === "APP_NOT_FOUND") {
-          const appName = String(resObj?.appId || "application");
-          const msg =
-            resType === "APP_LAUNCHED"
-              ? `App launch successful (${appName})`
-              : resType === "APP_NOT_INSTALLED"
-              ? `App not installed (${appName})`
-              : payload.error || `App launch ${payload.status}`;
-
-          setDeviceLaunchResults((prev) => ({
-            ...prev,
-            [payload.deviceId]: {
-              status: payload.status,
-              message: msg,
-            },
-          }));
-          setLaunchingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
-        } else {
-          // General command status fallback
-          setDevicePingResults((prev) => ({
-            ...prev,
-            [payload.deviceId]: {
-              status: payload.status,
-              latencyMs,
-              message: `Command ${payload.status}: ${payload.error || ""}`,
-            },
-          }));
-          setPingingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
-          setLaunchingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
-        }
-      },
-    });
-
-    return () => {
-      sub.unsubscribe();
-    };
-  }, [currentUserId, activeTab]);
-
-  // Periodic polling fallback for devices when Devices tab is open
-  useEffect(() => {
-    if (activeTab !== "devices") return;
-
-    const interval = setInterval(() => {
+    if (activeTab === "devices") {
       void fetchDevices();
-    }, 5000);
-
-    return () => clearInterval(interval);
+    }
   }, [activeTab, fetchDevices]);
 
   // Pairing code countdown timer
@@ -296,19 +181,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     }
   };
 
-  // Unpair device
+  // Unpair device via persistent context
   const handleUnpairDevice = async (deviceId: string) => {
     setUnpairingDeviceId(deviceId);
     setDevicesFeedback(null);
 
     try {
-      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setDevices((prev) => prev.filter((d) => d.deviceId !== deviceId));
+      const res = await unpairDeviceDirect(deviceId);
+      if (res.success) {
         setDevicesFeedback({
           type: "success",
           message: "Device successfully unpaired and credentials revoked.",
@@ -316,7 +196,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       } else {
         setDevicesFeedback({
           type: "error",
-          message: data.error || "Failed to unpair device.",
+          message: res.error || "Failed to unpair device.",
         });
       }
     } catch (err) {
@@ -327,93 +207,19 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     }
   };
 
-  // Dispatch PING command to companion device
-  const handlePingDevice = async (deviceId: string) => {
-    setPingingDeviceId(deviceId);
-    pingStartTimesRef.current[deviceId] = Date.now();
-    setDevicePingResults((prev) => ({
-      ...prev,
-      [deviceId]: { status: "PENDING", message: "Dispatching PING..." },
-    }));
-
-    try {
-      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/commands`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commandType: "PING", payload: {} }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setDevicePingResults((prev) => ({
-          ...prev,
-          [deviceId]: { status: "FAILED", message: data.error || "Failed to dispatch PING" },
-        }));
-        setPingingDeviceId(null);
-      } else {
-        setDevicePingResults((prev) => ({
-          ...prev,
-          [deviceId]: { status: "PENDING", message: "PING sent, awaiting companion PONG..." },
-        }));
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Network error";
-      setDevicePingResults((prev) => ({
-        ...prev,
-        [deviceId]: { status: "FAILED", message: msg },
-      }));
-      setPingingDeviceId(null);
-    }
-  };
-
-  // Dispatch OPEN_APP command to companion device
+  // Launch application on companion device via persistent context
   const handleLaunchApp = async (deviceId: string) => {
-    const appId = selectedAppPerDevice[deviceId] || "whatsapp";
-    const appConfig = approvedApps.find((a) => a.appId === appId);
-    const appDisplayName = appConfig ? appConfig.name : appId;
+    const devCatalog = appCatalogs[deviceId] || [];
+    const availableApps =
+      devCatalog.length > 0
+        ? devCatalog
+        : approvedApps.map((a) => ({ appId: a.appId, displayName: a.name }));
 
-    setLaunchingDeviceId(deviceId);
-    setDeviceLaunchResults((prev) => ({
-      ...prev,
-      [deviceId]: { status: "PENDING", message: `Launching ${appDisplayName}...` },
-    }));
+    const selectedAppId = selectedAppPerDevice[deviceId] || availableApps[0]?.appId || "whatsapp";
+    const appObj = availableApps.find((a) => a.appId === selectedAppId);
+    const appDisplayName = appObj?.displayName || selectedAppId;
 
-    try {
-      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/commands`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          commandType: "OPEN_APP",
-          payload: { appId },
-        }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setDeviceLaunchResults((prev) => ({
-          ...prev,
-          [deviceId]: {
-            status: "FAILED",
-            message: data.error || `Failed to launch ${appDisplayName}`,
-          },
-        }));
-        setLaunchingDeviceId(null);
-      } else {
-        setDeviceLaunchResults((prev) => ({
-          ...prev,
-          [deviceId]: {
-            status: "PENDING",
-            message: `Launch command dispatched to ${appDisplayName}, awaiting device confirmation...`,
-          },
-        }));
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Network error";
-      setDeviceLaunchResults((prev) => ({
-        ...prev,
-        [deviceId]: { status: "FAILED", message: msg },
-      }));
-      setLaunchingDeviceId(null);
-    }
+    await handleLaunchAppDirect(deviceId, selectedAppId, appDisplayName);
   };
 
 
@@ -944,54 +750,99 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                           </span>
                         </div>
 
-                        {/* OPEN_APP Selector and Action */}
-                        <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "6px", flexWrap: "wrap" }}>
-                          <span style={{ fontSize: "10px", color: "rgba(255, 255, 255, 0.6)", letterSpacing: "0.05em" }}>
-                            OPEN APP:
-                          </span>
-                          <select
-                            value={selectedAppPerDevice[dev.deviceId] || "whatsapp"}
-                            onChange={(e) =>
-                              setSelectedAppPerDevice((prev) => ({
-                                ...prev,
-                                [dev.deviceId]: e.target.value,
-                              }))
-                            }
-                            disabled={dev.connectionStatus !== "connected" || launchingDeviceId === dev.deviceId}
-                            style={{
-                              background: "rgba(0, 20, 30, 0.8)",
-                              border: "1px solid rgba(0, 240, 255, 0.3)",
-                              color: "#00f0ff",
-                              fontSize: "10px",
-                              padding: "2px 6px",
-                              borderRadius: "3px",
-                              outline: "none",
-                              cursor: dev.connectionStatus !== "connected" ? "not-allowed" : "pointer",
-                            }}
-                          >
-                            {approvedApps.map((app) => (
-                              <option key={app.appId} value={app.appId} style={{ background: "#0a1015", color: "#e0f7ff" }}>
-                                {app.name}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            type="button"
-                            className="hud-btn settings-btn"
-                            style={{
-                              height: "24px",
-                              fontSize: "9.5px",
-                              padding: "0 8px",
-                              borderColor: "rgba(0, 240, 255, 0.5)",
-                              color: "#00f0ff",
-                            }}
-                            onClick={() => handleLaunchApp(dev.deviceId)}
-                            disabled={launchingDeviceId === dev.deviceId || dev.connectionStatus !== "connected"}
-                            title={dev.connectionStatus !== "connected" ? "Device is offline" : "Launch application on device"}
-                          >
-                            {launchingDeviceId === dev.deviceId ? "LAUNCHING..." : "LAUNCH"}
-                          </button>
-                        </div>
+                        {/* OPEN_APP Selector, Dynamic Catalog, and Actions */}
+                        {(() => {
+                          const devCatalog = appCatalogs[dev.deviceId] || [];
+                          const availableApps =
+                            devCatalog.length > 0
+                              ? devCatalog
+                              : approvedApps.map((a) => ({ appId: a.appId, displayName: a.name }));
+                          const selectedVal =
+                            selectedAppPerDevice[dev.deviceId] || availableApps[0]?.appId || "whatsapp";
+
+                          return (
+                            <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "6px", flexWrap: "wrap" }}>
+                              <span style={{ fontSize: "10px", color: "rgba(255, 255, 255, 0.6)", letterSpacing: "0.05em" }}>
+                                OPEN APP:
+                              </span>
+                              <select
+                                value={selectedVal}
+                                onChange={(e) =>
+                                  setSelectedAppPerDevice((prev) => ({
+                                    ...prev,
+                                    [dev.deviceId]: e.target.value,
+                                  }))
+                                }
+                                disabled={dev.connectionStatus !== "connected" || launchingDeviceId === dev.deviceId}
+                                style={{
+                                  background: "rgba(0, 20, 30, 0.8)",
+                                  border: "1px solid rgba(0, 240, 255, 0.3)",
+                                  color: "#00f0ff",
+                                  fontSize: "10px",
+                                  padding: "2px 6px",
+                                  borderRadius: "3px",
+                                  outline: "none",
+                                  maxWidth: "160px",
+                                  cursor: dev.connectionStatus !== "connected" ? "not-allowed" : "pointer",
+                                }}
+                              >
+                                {availableApps.map((app) => (
+                                  <option key={app.appId} value={app.appId} style={{ background: "#0a1015", color: "#e0f7ff" }}>
+                                    {app.displayName}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <button
+                                type="button"
+                                className="hud-btn settings-btn"
+                                style={{
+                                  height: "24px",
+                                  fontSize: "9.5px",
+                                  padding: "0 8px",
+                                  borderColor: "rgba(0, 240, 255, 0.5)",
+                                  color: "#00f0ff",
+                                }}
+                                onClick={() => handleLaunchApp(dev.deviceId)}
+                                disabled={launchingDeviceId === dev.deviceId || dev.connectionStatus !== "connected"}
+                                title={dev.connectionStatus !== "connected" ? "Device is offline" : "Launch application on device"}
+                              >
+                                {launchingDeviceId === dev.deviceId ? "LAUNCHING..." : "LAUNCH"}
+                              </button>
+
+                              <button
+                                type="button"
+                                className="hud-btn settings-btn"
+                                style={{
+                                  height: "24px",
+                                  fontSize: "9px",
+                                  padding: "0 6px",
+                                  borderColor: "rgba(255, 170, 48, 0.35)",
+                                  color: "#ffaa30",
+                                }}
+                                onClick={() => refreshAppCatalog(dev.deviceId)}
+                                disabled={dev.connectionStatus !== "connected"}
+                                title="Refresh discovered application catalog"
+                              >
+                                ↻ SYNC
+                              </button>
+
+                              <span
+                                style={{
+                                  fontSize: "9px",
+                                  letterSpacing: "0.08em",
+                                  color: devCatalog.length > 0 ? "#00ffcc" : "rgba(255, 255, 255, 0.4)",
+                                  background: "rgba(0, 0, 0, 0.3)",
+                                  padding: "2px 6px",
+                                  borderRadius: "2px",
+                                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                                }}
+                              >
+                                {devCatalog.length > 0 ? `${devCatalog.length} APPS` : "DEFAULT"}
+                              </span>
+                            </div>
+                          );
+                        })()}
 
                         {/* Live Feedback Messages */}
                         {deviceLaunchResults[dev.deviceId] && (

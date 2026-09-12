@@ -3,6 +3,12 @@ package com.ultron.companion.network
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Handler
 import android.os.Looper
 import okhttp3.OkHttpClient
@@ -10,6 +16,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.util.Collections
@@ -18,13 +25,18 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
 
-class UltronRealtimeManager(
+data class DiscoveredApp(
+    val appId: String,
+    val displayName: String,
+    val packageName: String
+)
+
+class UltronRealtimeManager private constructor(
+    private val appContext: Context,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
 ) {
-    var appContext: Context? = null
-
     private var webSocket: WebSocket? = null
     private var isIntentionalClose = false
     private var reconnectAttempts = 0
@@ -34,9 +46,59 @@ class UltronRealtimeManager(
     private var currentConfig: RealtimeConfigResponse? = null
     private var currentToken: String = ""
 
-    var onStateChanged: ((state: ConnectionState, message: String?, lastSeenAt: String?) -> Unit)? = null
+    private val discoveredApps = Collections.synchronizedMap(LinkedHashMap<String, DiscoveredApp>())
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    init {
+        discoverInstalledApps()
+        registerNetworkCallback()
+    }
+
+    var connectionState: ConnectionState = ConnectionState.STANDBY
+        private set
+
+    // Support multiple state change listeners (e.g. HeartbeatService for notification, MainActivity for UI)
+    private val stateListeners = Collections.synchronizedMap(LinkedHashMap<String, (ConnectionState, String?, String?) -> Unit>())
+    private val commandProcessedListeners = Collections.synchronizedMap(LinkedHashMap<String, (String, String, JSONObject?) -> Unit>())
+
+    // Backward-compatible single listener property (routes to "default" key)
+    var onStateChanged: ((state: ConnectionState, message: String?, lastSeenAt: String?) -> Unit)?
+        get() = stateListeners["default"]
+        set(value) {
+            if (value != null) {
+                stateListeners["default"] = value
+            } else {
+                stateListeners.remove("default")
+            }
+        }
+
+    fun addStateListener(key: String, listener: (ConnectionState, String?, String?) -> Unit) {
+        stateListeners[key] = listener
+    }
+
+    fun removeStateListener(key: String) {
+        stateListeners.remove(key)
+    }
+
+    var onDeviceCommandProcessed: ((commandId: String, status: String, result: JSONObject?) -> Unit)?
+        get() = commandProcessedListeners["default"]
+        set(value) {
+            if (value != null) {
+                commandProcessedListeners["default"] = value
+            } else {
+                commandProcessedListeners.remove("default")
+            }
+        }
+
+    fun addCommandProcessedListener(key: String, listener: (String, String, JSONObject?) -> Unit) {
+        commandProcessedListeners[key] = listener
+    }
+
+    fun removeCommandProcessedListener(key: String) {
+        commandProcessedListeners.remove(key)
+    }
+
     var onCommandReceived: ((commandId: String, action: String, params: JSONObject?) -> Unit)? = null
-    var onDeviceCommandProcessed: ((commandId: String, status: String, result: JSONObject?) -> Unit)? = null
 
     // Bounded replay protection cache: LRU eviction, max 500 entries
     private val processedCommandIds = Collections.synchronizedSet(
@@ -63,7 +125,44 @@ class UltronRealtimeManager(
         }
     }
 
+    private fun notifyStateChanged(state: ConnectionState, message: String?, lastSeenAt: String?) {
+        connectionState = state
+        handler.post {
+            val listeners = synchronized(stateListeners) { stateListeners.values.toList() }
+            listeners.forEach { listener ->
+                try {
+                    listener.invoke(state, message, lastSeenAt)
+                } catch (e: Exception) {
+                    // Ignore listener exceptions
+                }
+            }
+        }
+    }
+
+    private fun notifyCommandProcessed(commandId: String, status: String, result: JSONObject?) {
+        handler.post {
+            val listeners = synchronized(commandProcessedListeners) { commandProcessedListeners.values.toList() }
+            listeners.forEach { listener ->
+                try {
+                    listener.invoke(commandId, status, result)
+                } catch (e: Exception) {
+                    // Ignore listener exceptions
+                }
+            }
+        }
+    }
+
+    @Synchronized
     fun connect(config: RealtimeConfigResponse, token: String) {
+        // If already connected or connecting to the exact same channel with the same token, do not duplicate
+        if (webSocket != null && !isIntentionalClose && currentConfig?.realtimeWsUrl == config.realtimeWsUrl && currentToken == token) {
+            android.util.Log.d("ULTRON_REALTIME", "Already connected/connecting to realtime channel, reusing existing connection")
+            if (connectionState == ConnectionState.CONNECTED) {
+                notifyStateChanged(ConnectionState.CONNECTED, "Supabase Realtime link active.", null)
+            }
+            return
+        }
+
         currentConfig = config
         currentToken = token
         isIntentionalClose = false
@@ -73,16 +172,16 @@ class UltronRealtimeManager(
 
         val wsUrl = config.realtimeWsUrl
         if (wsUrl.isBlank()) {
-            onStateChanged?.invoke(ConnectionState.OFFLINE, "No valid Realtime URL provided.", null)
+            notifyStateChanged(ConnectionState.OFFLINE, "No valid Realtime URL provided.", null)
             return
         }
 
         if (wsUrl.contains(":3001") && (wsUrl.contains("vercel.app") || wsUrl.startsWith("wss://"))) {
-            onStateChanged?.invoke(ConnectionState.OFFLINE, "Legacy WebSocket port 3001 is not available in production.", null)
+            notifyStateChanged(ConnectionState.OFFLINE, "Legacy WebSocket port 3001 is not available in production.", null)
             return
         }
 
-        onStateChanged?.invoke(
+        notifyStateChanged(
             ConnectionState.CONNECTING,
             if (config.provider == "supabase") "Connecting to Supabase Realtime…" else "Connecting to local WebSocket…",
             null
@@ -96,7 +195,7 @@ class UltronRealtimeManager(
         }
 
         if (targetUrl.contains(":3001") && (targetUrl.contains("vercel.app") || targetUrl.startsWith("wss://"))) {
-            onStateChanged?.invoke(ConnectionState.OFFLINE, "Legacy WebSocket port 3001 is not available in production.", null)
+            notifyStateChanged(ConnectionState.OFFLINE, "Legacy WebSocket port 3001 is not available in production.", null)
             return
         }
 
@@ -155,26 +254,24 @@ class UltronRealtimeManager(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                this@UltronRealtimeManager.webSocket = null
                 stopHeartbeat()
-                handler.post {
-                    onStateChanged?.invoke(ConnectionState.OFFLINE, "Disconnected ($reason)", null)
-                    if (!isIntentionalClose) {
-                        scheduleReconnect()
-                    }
+                notifyStateChanged(ConnectionState.OFFLINE, "Disconnected ($reason)", null)
+                if (!isIntentionalClose) {
+                    scheduleReconnect()
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                this@UltronRealtimeManager.webSocket = null
                 stopHeartbeat()
-                handler.post {
-                    onStateChanged?.invoke(
-                        ConnectionState.OFFLINE,
-                        "Realtime link offline: ${t.message ?: "Network error"}",
-                        null
-                    )
-                    if (!isIntentionalClose) {
-                        scheduleReconnect()
-                    }
+                notifyStateChanged(
+                    ConnectionState.OFFLINE,
+                    "Realtime link offline: ${t.message ?: "Network error"}",
+                    null
+                )
+                if (!isIntentionalClose) {
+                    scheduleReconnect()
                 }
             }
         })
@@ -189,15 +286,14 @@ class UltronRealtimeManager(
                 val payload = json.optJSONObject("payload")
                 val status = payload?.optString("status")
                 if (status == "ok" && topic == currentConfig?.phoenixTopic) {
-                    handler.post {
-                        onStateChanged?.invoke(
-                            ConnectionState.CONNECTED,
-                            "Supabase Realtime link active.",
-                            null
-                        )
-                        startHeartbeat()
-                        broadcastDeviceStatus("connected")
-                    }
+                    notifyStateChanged(
+                        ConnectionState.CONNECTED,
+                        "Supabase Realtime link active.",
+                        null
+                    )
+                    startHeartbeat()
+                    broadcastDeviceStatus("connected")
+                    broadcastAppCatalog()
                 }
             }
             "broadcast" -> {
@@ -214,15 +310,17 @@ class UltronRealtimeManager(
                     }
                 } else if (bEvent == "device_command" && bPayload != null) {
                     handleDeviceCommand(bPayload)
+                } else if (bEvent == "request_app_catalog" || bEvent == "device:request_catalog") {
+                    discoverInstalledApps()
+                    broadcastAppCatalog()
                 }
             }
             "phx_error", "phx_close" -> {
+                this@UltronRealtimeManager.webSocket = null
                 stopHeartbeat()
-                handler.post {
-                    onStateChanged?.invoke(ConnectionState.OFFLINE, "Channel closed ($event)", null)
-                    if (!isIntentionalClose) {
-                        scheduleReconnect()
-                    }
+                notifyStateChanged(ConnectionState.OFFLINE, "Channel closed ($event)", null)
+                if (!isIntentionalClose) {
+                    scheduleReconnect()
                 }
             }
         }
@@ -232,26 +330,20 @@ class UltronRealtimeManager(
         val type = json.optString("type")
         when (type) {
             "authenticated" -> {
-                handler.post {
-                    onStateChanged?.invoke(
-                        ConnectionState.CONNECTED,
-                        "Legacy real-time link established.",
-                        json.optString("timestamp")
-                    )
-                    startHeartbeat()
-                }
+                notifyStateChanged(
+                    ConnectionState.CONNECTED,
+                    "Legacy real-time link established.",
+                    json.optString("timestamp")
+                )
+                startHeartbeat()
             }
             "heartbeat_ack", "pong" -> {
                 val lastSeen = json.optString("lastSeenAt", "")
-                handler.post {
-                    onStateChanged?.invoke(ConnectionState.CONNECTED, "Heartbeat acknowledged.", lastSeen)
-                }
+                notifyStateChanged(ConnectionState.CONNECTED, "Heartbeat acknowledged.", lastSeen)
             }
             "error" -> {
                 val err = json.optString("message", "Error")
-                handler.post {
-                    onStateChanged?.invoke(ConnectionState.OFFLINE, err, null)
-                }
+                notifyStateChanged(ConnectionState.OFFLINE, err, null)
             }
         }
     }
@@ -261,7 +353,7 @@ class UltronRealtimeManager(
         val config = currentConfig ?: return
 
         if (config.provider == "supabase") {
-            // 1. Phoenix connection heartbeat
+            // 1. Supabase/Phoenix protocol heartbeat: topic="phoenix", event="heartbeat"
             val hbRef = messageRef.getAndIncrement().toString()
             val phoenixHb = JSONObject().apply {
                 put("topic", "phoenix")
@@ -349,7 +441,7 @@ class UltronRealtimeManager(
             // ignore
         }
         webSocket = null
-        onStateChanged?.invoke(ConnectionState.STANDBY, "Disconnected", null)
+        notifyStateChanged(ConnectionState.STANDBY, "Disconnected", null)
     }
 
     private fun handleDeviceCommand(bPayload: JSONObject) {
@@ -376,6 +468,7 @@ class UltronRealtimeManager(
                 broadcastCommandResult(
                     commandId = commandId,
                     status = "EXPIRED",
+                    commandType = commandType,
                     error = "Command expired before processing."
                 )
                 return
@@ -389,18 +482,40 @@ class UltronRealtimeManager(
                 broadcastCommandResult(
                     commandId = commandId,
                     status = "DUPLICATE",
+                    commandType = commandType,
                     error = "Command has already been processed."
                 )
                 return
             }
 
-            // 4. Command allowlist validation (PING and OPEN_APP supported)
-            if (commandType != "PING" && commandType != "OPEN_APP") {
+            // 4. Command allowlist validation (PING, OPEN_APP, and REQUEST_CATALOG supported)
+            if (commandType != "PING" && commandType != "OPEN_APP" && commandType != "REQUEST_CATALOG") {
                 broadcastCommandResult(
                     commandId = commandId,
                     status = "FAILED",
-                    error = "Unsupported commandType: '$commandType'. Only PING and OPEN_APP are supported."
+                    commandType = commandType,
+                    error = "Unsupported commandType: '$commandType'. Only PING, OPEN_APP, and REQUEST_CATALOG are supported."
                 )
+                return
+            }
+
+            if (commandType == "REQUEST_CATALOG") {
+                synchronized(processedCommandIds) {
+                    processedCommandIds.add(commandId)
+                }
+                discoverInstalledApps()
+                broadcastAppCatalog()
+                val catalogResult = JSONObject().apply {
+                    put("type", "CATALOG_SYNCED")
+                    put("count", discoveredApps.size)
+                }
+                broadcastCommandResult(
+                    commandId = commandId,
+                    status = "SUCCESS",
+                    commandType = "REQUEST_CATALOG",
+                    result = catalogResult
+                )
+                notifyCommandProcessed(commandId, "SUCCESS", catalogResult)
                 return
             }
 
@@ -417,12 +532,11 @@ class UltronRealtimeManager(
                 broadcastCommandResult(
                     commandId = commandId,
                     status = "SUCCESS",
+                    commandType = "PING",
                     result = pongResult
                 )
 
-                handler.post {
-                    onDeviceCommandProcessed?.invoke(commandId, "SUCCESS", pongResult)
-                }
+                notifyCommandProcessed(commandId, "SUCCESS", pongResult)
                 return
             }
 
@@ -431,32 +545,29 @@ class UltronRealtimeManager(
                 val appId = payloadObj?.optString("appId")?.trim()?.lowercase() ?: ""
                 val packageName = payloadObj?.optString("packageName")?.trim() ?: ""
 
-                // Defense-in-depth allowlist verification on Android
-                val expectedPackage = ALLOWED_PACKAGES[appId]
+                // Defense-in-depth dynamic app verification on Android:
+                // Package name MUST ONLY be resolved locally from the verified appId.
+                // The server/client cannot inject an arbitrary or mismatched packageName.
+                val resolvedApp = discoveredApps[appId]
+                val expectedPackage = resolvedApp?.packageName ?: ALLOWED_PACKAGES[appId]
+
                 if (expectedPackage == null || (packageName.isNotEmpty() && packageName != expectedPackage)) {
+                    val disallowedResult = JSONObject().apply {
+                        put("type", "APP_DISALLOWED")
+                        put("appId", appId)
+                    }
                     broadcastCommandResult(
                         commandId = commandId,
                         status = "FAILED",
-                        result = JSONObject().apply {
-                            put("type", "APP_DISALLOWED")
-                            put("appId", appId)
-                        },
-                        error = "Application '$appId' is not permitted on this device."
+                        commandType = "OPEN_APP",
+                        result = disallowedResult,
+                        error = "Application '$appId' is not permitted or installed on this device."
                     )
+                    notifyCommandProcessed(commandId, "FAILED", disallowedResult)
                     return
                 }
 
-                val ctx = appContext
-                if (ctx == null) {
-                    broadcastCommandResult(
-                        commandId = commandId,
-                        status = "FAILED",
-                        error = "Device context is not available for launching applications."
-                    )
-                    return
-                }
-
-                val pm = ctx.packageManager
+                val pm = appContext.packageManager
                 val launchIntent = try {
                     pm.getLaunchIntentForPackage(expectedPackage)
                 } catch (e: Exception) {
@@ -472,18 +583,17 @@ class UltronRealtimeManager(
                     broadcastCommandResult(
                         commandId = commandId,
                         status = "FAILED",
+                        commandType = "OPEN_APP",
                         result = notInstalledResult,
                         error = "Application '$appId' ($expectedPackage) is not installed."
                     )
-                    handler.post {
-                        onDeviceCommandProcessed?.invoke(commandId, "FAILED", notInstalledResult)
-                    }
+                    notifyCommandProcessed(commandId, "FAILED", notInstalledResult)
                     return
                 }
 
                 launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 try {
-                    ctx.startActivity(launchIntent)
+                    appContext.startActivity(launchIntent)
 
                     // Successfully launched -> record in bounded replay cache
                     synchronized(processedCommandIds) {
@@ -499,34 +609,40 @@ class UltronRealtimeManager(
                     broadcastCommandResult(
                         commandId = commandId,
                         status = "SUCCESS",
+                        commandType = "OPEN_APP",
                         result = successResult
                     )
 
-                    handler.post {
-                        onDeviceCommandProcessed?.invoke(commandId, "SUCCESS", successResult)
-                    }
+                    notifyCommandProcessed(commandId, "SUCCESS", successResult)
                 } catch (e: ActivityNotFoundException) {
+                    val notFoundResult = JSONObject().apply {
+                        put("type", "APP_NOT_FOUND")
+                        put("appId", appId)
+                    }
                     broadcastCommandResult(
                         commandId = commandId,
                         status = "FAILED",
-                        result = JSONObject().apply {
-                            put("type", "APP_NOT_FOUND")
-                            put("appId", appId)
-                        },
+                        commandType = "OPEN_APP",
+                        result = notFoundResult,
                         error = "Activity not found for application '$appId'."
                     )
+                    notifyCommandProcessed(commandId, "FAILED", notFoundResult)
                 } catch (e: SecurityException) {
                     broadcastCommandResult(
                         commandId = commandId,
                         status = "FAILED",
+                        commandType = "OPEN_APP",
                         error = "Security restriction prevented launching '$appId'."
                     )
+                    notifyCommandProcessed(commandId, "FAILED", null)
                 } catch (e: Exception) {
                     broadcastCommandResult(
                         commandId = commandId,
                         status = "FAILED",
+                        commandType = "OPEN_APP",
                         error = "Failed to launch application '$appId'."
                     )
+                    notifyCommandProcessed(commandId, "FAILED", null)
                 }
             }
         } catch (e: Exception) {
@@ -537,6 +653,7 @@ class UltronRealtimeManager(
     private fun broadcastCommandResult(
         commandId: String,
         status: String,
+        commandType: String? = null,
         result: JSONObject? = null,
         error: String? = null
     ) {
@@ -556,6 +673,7 @@ class UltronRealtimeManager(
                     put("payload", JSONObject().apply {
                         put("commandId", commandId)
                         put("deviceId", config.deviceId)
+                        if (!commandType.isNullOrEmpty()) put("commandType", commandType)
                         put("status", status)
                         if (result != null) put("result", result)
                         if (error != null) put("error", error)
@@ -570,6 +688,141 @@ class UltronRealtimeManager(
         }
     }
 
+    private fun registerNetworkCallback() {
+        try {
+            val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+
+            val cb = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    android.util.Log.d("ULTRON_REALTIME", "Network available - checking companion reconnection")
+                    if (connectionState != ConnectionState.CONNECTED && !isIntentionalClose && currentConfig != null && currentToken.isNotEmpty()) {
+                        handler.post {
+                            connect(currentConfig!!, currentToken)
+                        }
+                    }
+                }
+
+                override fun onLost(network: Network) {
+                    android.util.Log.d("ULTRON_REALTIME", "Network lost")
+                }
+            }
+            networkCallback = cb
+            cm.registerNetworkCallback(request, cb)
+        } catch (e: Exception) {
+            android.util.Log.w("ULTRON_REALTIME", "Could not register NetworkCallback: ${e.message}")
+        }
+    }
+
+    fun discoverInstalledApps(): List<DiscoveredApp> {
+        val pm = appContext.packageManager
+        val intent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        // 1. Preload approved apps map
+        ALLOWED_PACKAGES.forEach { (appId, pkg) ->
+            try {
+                val appInfo = pm.getApplicationInfo(pkg, 0)
+                val label = pm.getApplicationLabel(appInfo).toString()
+                val entry = DiscoveredApp(appId, label, pkg)
+                discoveredApps[appId] = entry
+            } catch (e: Exception) {
+                // Not installed on device, skip
+            }
+        }
+
+        // 2. Query all launcher activities
+        try {
+            val activities: List<ResolveInfo> = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                pm.queryIntentActivities(intent, 0)
+            }
+
+            for (info in activities) {
+                val pkgName = info.activityInfo.packageName
+                if (pkgName.isNullOrBlank() || pkgName == appContext.packageName) continue
+                if (isBlacklistedPackage(pkgName)) continue
+
+                val label = info.loadLabel(pm).toString().trim()
+                if (label.isEmpty()) continue
+
+                val existingEntry = discoveredApps.values.firstOrNull { it.packageName == pkgName }
+                if (existingEntry != null) continue
+
+                val rawId = label.lowercase().replace(Regex("[^a-z0-9_]"), "_").trim('_')
+                var candidateId = if (rawId.isNotEmpty()) rawId else "app_${pkgName.substringAfterLast('.')}"
+                if (candidateId.length > 32) candidateId = candidateId.substring(0, 32)
+
+                var finalId = candidateId
+                var counter = 2
+                while (discoveredApps.containsKey(finalId) && discoveredApps[finalId]?.packageName != pkgName) {
+                    finalId = "${candidateId}_$counter"
+                    counter++
+                }
+
+                val appEntry = DiscoveredApp(finalId, label, pkgName)
+                discoveredApps[finalId] = appEntry
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ULTRON_REALTIME", "Error discovering launcher apps: ${e.message}")
+        }
+
+        return synchronized(discoveredApps) { discoveredApps.values.toList() }
+    }
+
+    fun getDiscoveredApps(): List<DiscoveredApp> {
+        return synchronized(discoveredApps) { discoveredApps.values.toList() }
+    }
+
+    private fun isBlacklistedPackage(pkg: String): Boolean {
+        val lower = pkg.lowercase()
+        return lower.contains("keychain") ||
+                lower.contains("packageinstaller") ||
+                lower.contains("setupwizard") ||
+                lower == "android" ||
+                lower.contains("certinstaller")
+    }
+
+    fun broadcastAppCatalog() {
+        val ws = webSocket ?: return
+        val config = currentConfig ?: return
+        if (config.provider != "supabase") return
+
+        try {
+            val bRef = messageRef.getAndIncrement().toString()
+            val appsList = synchronized(discoveredApps) { discoveredApps.values.toList() }
+            val appsArray = JSONArray()
+            appsList.forEach { app ->
+                appsArray.put(JSONObject().apply {
+                    put("appId", app.appId)
+                    put("displayName", app.displayName)
+                })
+            }
+
+            val broadcastMsg = JSONObject().apply {
+                put("topic", config.phoenixTopic)
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "device:app_catalog")
+                    put("payload", JSONObject().apply {
+                        put("deviceId", config.deviceId)
+                        put("apps", appsArray)
+                        put("timestamp", System.currentTimeMillis())
+                    })
+                })
+                put("ref", bRef)
+            }
+            ws.send(broadcastMsg.toString())
+        } catch (e: Exception) {
+            android.util.Log.e("ULTRON_REALTIME", "Failed to broadcast app catalog: ${e.message}")
+        }
+    }
+
     companion object {
         private const val HEARTBEAT_INTERVAL_MS = 25000L // 25 seconds
 
@@ -581,5 +834,21 @@ class UltronRealtimeManager(
             "gmail" to "com.google.android.gm",
             "settings" to "com.android.settings"
         )
+
+        @Volatile
+        private var instance: UltronRealtimeManager? = null
+
+        fun getInstance(context: Context): UltronRealtimeManager {
+            return instance ?: synchronized(this) {
+                instance ?: UltronRealtimeManager(context.applicationContext).also { instance = it }
+            }
+        }
+
+        fun resetInstanceForTest() {
+            synchronized(this) {
+                instance?.disconnect()
+                instance = null
+            }
+        }
     }
 }

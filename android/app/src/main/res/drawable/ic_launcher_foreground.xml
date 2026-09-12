@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Cyan Segmented Ring -->
+    <path
+        android:pathData="M 54,12 A 42,42 0 0,1 96,54"
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 96,54 A 42,42 0 0,1 54,96"
+        android:strokeColor="#0080FF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 54,96 A 42,42 0 0,1 12,54"
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 12,54 A 42,42 0 0,1 54,12"
+        android:strokeColor="#0080FF"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+
+    <!-- Cardinal Targeting Ticks -->
+    <path
+        android:pathData="M 54,8 L 54,14 M 54,94 L 54,100 M 8,54 L 14,54 M 94,54 L 100,54"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="square" />
+
+    <!-- Mid Amber/Gold Reactor Arcs -->
+    <path
+        android:pathData="M 33,25 A 33,33 0 0,1 75,25"
+        android:strokeColor="#FFC700"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 83,33 A 33,33 0 0,1 83,75"
+        android:strokeColor="#FF8800"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 75,83 A 33,33 0 0,1 33,83"
+        android:strokeColor="#FFC700"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M 25,75 A 33,33 0 0,1 25,33"
+        android:strokeColor="#FF8800"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round" />
+
+    <!-- Inner Cyan Containment Circle -->
+    <path
+        android:pathData="M 54,30 A 24,24 0 1,1 53.9,30"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="1.2" />
+
+    <!-- Inner Reactor Core Singularity Rings -->
+    <path
+        android:pathData="M 54,39 A 15,15 0 1,1 53.9,39"
+        android:fillColor="#1500F0FF"
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="1.0" />
+
+    <path
+        android:pathData="M 54,45 A 9,9 0 1,1 53.9,45"
+        android:fillColor="#4000F0FF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.2" />
+
+    <!-- White-Hot Nuclear Center -->
+    <path
+        android:pathData="M 54,49 A 5,5 0 1,1 53.9,49"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Diamond HUD Crosshair -->
+    <path
+        android:pathData="M 54,48 L 60,54 L 54,60 L 48,54 Z"
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="0.8" />
+</vector>
