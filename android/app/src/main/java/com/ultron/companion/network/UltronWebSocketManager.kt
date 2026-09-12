@@ -54,6 +54,11 @@ class UltronWebSocketManager(
         handler.removeCallbacks(reconnectRunnable)
         handler.removeCallbacks(heartbeatRunnable)
 
+        if (wsUrl.contains(":3001") && (wsUrl.contains("vercel.app") || wsUrl.startsWith("wss://"))) {
+            onStateChanged?.invoke(ConnectionState.OFFLINE, "Legacy WebSocket port 3001 is not available in production.", null)
+            return
+        }
+
         val fullUrl = if (wsUrl.contains("?")) "$wsUrl&token=$token" else "$wsUrl?token=$token"
 
         onStateChanged?.invoke(ConnectionState.CONNECTING, "Connecting to ULTRON WebSocket…", null)

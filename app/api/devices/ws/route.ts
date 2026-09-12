@@ -6,18 +6,24 @@ export async function GET(request: Request) {
     const host = request.headers.get("host")?.split(":")[0] || "localhost";
     const port = getDeviceWsPort();
 
-    // Ensure server is started in dev / standalone runtime
-    try {
-      startDeviceWebSocketServer(port);
-    } catch {
-      // already started or serverless
+    const isLocalhost = host === "localhost" || host === "127.0.0.1";
+
+    // Ensure server is started only in local dev standalone runtime
+    if (isLocalhost) {
+      try {
+        startDeviceWebSocketServer(port);
+      } catch {
+        // already started or serverless
+      }
     }
 
-    const wsUrl = `ws://${host}:${port}`;
+    const wsUrl = isLocalhost ? `ws://${host}:${port}` : null;
 
     return NextResponse.json({
       success: true,
+      legacy: true,
       wsUrl,
+      realtimeEndpoint: "/api/devices/realtime",
       activeConnections: getActiveDeviceConnectionCount(),
       heartbeatIntervalMs: 30000,
     });

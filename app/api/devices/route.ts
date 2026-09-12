@@ -9,6 +9,7 @@ export async function GET(request: Request) {
 
     const response = NextResponse.json({
       success: true,
+      userId,
       devices,
     });
 

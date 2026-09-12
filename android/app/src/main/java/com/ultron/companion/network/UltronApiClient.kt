@@ -24,6 +24,18 @@ data class HeartbeatResponse(
     val lastSeenAt: String
 )
 
+data class RealtimeConfigResponse(
+    val success: Boolean,
+    val configured: Boolean,
+    val provider: String,
+    val channel: String,
+    val phoenixTopic: String,
+    val realtimeWsUrl: String,
+    val deviceId: String,
+    val userId: String,
+    val heartbeatIntervalMs: Long = 25000L
+)
+
 class UltronApiClient(
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -46,9 +58,6 @@ class UltronApiClient(
         android.util.Log.d("ULTRON_PAIRING", "--> [START] Claim Pairing Request")
         android.util.Log.d("ULTRON_PAIRING", "Target URL: $endpoint")
         android.util.Log.d("ULTRON_PAIRING", "HTTP Method: POST")
-        android.util.Log.d("ULTRON_PAIRING", "Start Time: $startTime ms")
-        android.util.Log.d("ULTRON_PAIRING", "Connect Timeout: ${client.connectTimeoutMillis} ms")
-        android.util.Log.d("ULTRON_PAIRING", "Read Timeout: ${client.readTimeoutMillis} ms")
 
         try {
             val jsonBody = JSONObject().apply {
@@ -57,8 +66,6 @@ class UltronApiClient(
                 put("platform", "Android")
                 put("appVersion", appVersion)
             }
-
-            android.util.Log.d("ULTRON_PAIRING", "Payload: $jsonBody")
 
             val request = Request.Builder()
                 .url(endpoint)
@@ -70,7 +77,6 @@ class UltronApiClient(
             val responseBody = response.body?.string() ?: ""
 
             android.util.Log.d("ULTRON_PAIRING", "<-- [RESPONSE] in ${duration}ms: HTTP ${response.code}")
-            android.util.Log.d("ULTRON_PAIRING", "Response Body: $responseBody")
 
             if (!response.isSuccessful) {
                 val errorMsg = try {
@@ -93,7 +99,7 @@ class UltronApiClient(
             )
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - startTime
-            android.util.Log.e("ULTRON_PAIRING", "<-- [EXCEPTION] in ${duration}ms: [${e.javaClass.name}] ${e.message}", e)
+            android.util.Log.e("ULTRON_PAIRING", "<-- [EXCEPTION] in ${duration}ms: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -116,7 +122,7 @@ class UltronApiClient(
             val responseBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
-                return@withContext Result.failure(IOException("Heartbeat failed (${response.code})"))
+                return@withContext Result.failure(IOException("Heartbeat failed (HTTP ${response.code})"))
             }
 
             val json = JSONObject(responseBody)
@@ -132,11 +138,73 @@ class UltronApiClient(
         }
     }
 
-    suspend fun getWebSocketInfo(serverUrl: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val normalizedUrl = serverUrl.trimEnd('/')
-            val endpoint = "$normalizedUrl/api/devices/ws"
+    suspend fun getRealtimeConfig(
+        serverUrl: String,
+        deviceAuthToken: String
+    ): Result<RealtimeConfigResponse> = withContext(Dispatchers.IO) {
+        val normalizedUrl = serverUrl.trimEnd('/')
+        val endpoint = "$normalizedUrl/api/devices/realtime"
+        val startTime = System.currentTimeMillis()
 
+        android.util.Log.d("ULTRON_REALTIME", "--> [START] Realtime Config Request: $endpoint")
+
+        try {
+            val request = Request.Builder()
+                .url(endpoint)
+                .header("Authorization", "Bearer $deviceAuthToken")
+                .get()
+                .build()
+
+            val response = client.newCall(request).execute()
+            val duration = System.currentTimeMillis() - startTime
+            val responseBody = response.body?.string() ?: ""
+
+            android.util.Log.d("ULTRON_REALTIME", "<-- [RESPONSE] in ${duration}ms: HTTP ${response.code}")
+
+            if (!response.isSuccessful) {
+                val errorMsg = try {
+                    JSONObject(responseBody).optString("error", "HTTP ${response.code}")
+                } catch (e: Exception) {
+                    "HTTP ${response.code}"
+                }
+                android.util.Log.e("ULTRON_REALTIME", "Realtime config error: $errorMsg")
+                return@withContext Result.failure(IOException(errorMsg))
+            }
+
+            val json = JSONObject(responseBody)
+            val config = RealtimeConfigResponse(
+                success = json.optBoolean("success", true),
+                configured = json.optBoolean("configured", false),
+                provider = json.optString("provider", "supabase"),
+                channel = json.optString("channel", ""),
+                phoenixTopic = json.optString("phoenixTopic", "realtime:${json.optString("channel", "")}"),
+                realtimeWsUrl = json.optString("realtimeWsUrl", ""),
+                deviceId = json.optString("deviceId", ""),
+                userId = json.optString("userId", ""),
+                heartbeatIntervalMs = json.optLong("heartbeatIntervalMs", 25000L)
+            )
+            android.util.Log.d("ULTRON_REALTIME", "Realtime config parsed successfully: provider=${config.provider}")
+            Result.success(config)
+        } catch (e: Exception) {
+            val duration = System.currentTimeMillis() - startTime
+            android.util.Log.e("ULTRON_REALTIME", "<-- [EXCEPTION] in ${duration}ms: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getWebSocketInfo(serverUrl: String): Result<String> = withContext(Dispatchers.IO) {
+        val normalizedUrl = serverUrl.trimEnd('/')
+
+        // Production Vercel / HTTPS URLs NEVER use legacy port 3001
+        val isProduction = normalizedUrl.startsWith("https://") || normalizedUrl.contains("vercel.app")
+        if (isProduction) {
+            return@withContext Result.failure(
+                IllegalStateException("Legacy WebSocket port 3001 is not supported in production. Use Supabase Realtime.")
+            )
+        }
+
+        try {
+            val endpoint = "$normalizedUrl/api/devices/ws"
             val request = Request.Builder()
                 .url(endpoint)
                 .get()
@@ -147,20 +215,14 @@ class UltronApiClient(
 
             if (response.isSuccessful) {
                 val json = JSONObject(responseBody)
-                var wsUrl = json.optString("wsUrl", "")
-                if (normalizedUrl.startsWith("https://") && wsUrl.startsWith("ws://")) {
-                    wsUrl = wsUrl.replace("ws://", "wss://")
-                }
-                if (wsUrl.isNotEmpty()) {
+                val wsUrl = json.optString("wsUrl", "")
+                if (wsUrl.isNotEmpty() && !wsUrl.contains(":3001")) {
                     return@withContext Result.success(wsUrl)
                 }
             }
-            // Fallback derived WebSocket URL if not specified
-            val fallbackWs = if (normalizedUrl.startsWith("https://")) {
-                normalizedUrl.replace("https://", "wss://")
-            } else {
-                normalizedUrl.replace("http://", "ws://")
-            }
+
+            // Localhost fallback only
+            val fallbackWs = normalizedUrl.replace("http://", "ws://")
             Result.success(fallbackWs)
         } catch (e: Exception) {
             Result.failure(e)

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import type { KeyStatus } from "@/lib/db/userApiKeyStore";
+import { subscribeToDeviceChannel } from "@/lib/realtime/deviceRealtime";
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -73,6 +74,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const [statusData, setStatusData] = useState<ApiKeyStatusResponse | null>(null);
   const [elevenLabsData, setElevenLabsData] = useState<ElevenLabsStatusResponse | null>(null);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activePairing, setActivePairing] = useState<PairingSessionInfo | null>(null);
   const [isGeneratingPairing, setIsGeneratingPairing] = useState(false);
   const [unpairingDeviceId, setUnpairingDeviceId] = useState<string | null>(null);
@@ -126,6 +128,9 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       if (res.ok) {
         const data = await res.json();
         setDevices(data.devices || []);
+        if (data.userId) {
+          setCurrentUserId(data.userId);
+        }
       }
     } catch (err) {
       console.error("Failed to load devices:", err);
@@ -137,13 +142,54 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     void fetchDevices();
   }, [fetchDevices, fetchStatus]);
 
-  // Periodic polling for devices when Devices tab is open
+  // Real-time companion status link via Supabase Realtime channel
+  useEffect(() => {
+    if (!currentUserId || activeTab !== "devices") return;
+
+    const sub = subscribeToDeviceChannel(currentUserId, {
+      onStatusChange: (payload) => {
+        setDevices((prev) =>
+          prev.map((d) =>
+            d.deviceId === payload.deviceId
+              ? {
+                  ...d,
+                  connectionStatus: payload.status,
+                  lastSeenAt: payload.timestamp || new Date().toISOString(),
+                }
+              : d
+          )
+        );
+      },
+      onHeartbeat: (payload) => {
+        setDevices((prev) =>
+          prev.map((d) =>
+            d.deviceId === payload.deviceId
+              ? {
+                  ...d,
+                  connectionStatus: "connected",
+                  lastSeenAt:
+                    typeof payload.timestamp === "number"
+                      ? new Date(payload.timestamp).toISOString()
+                      : payload.timestamp || new Date().toISOString(),
+                }
+              : d
+          )
+        );
+      },
+    });
+
+    return () => {
+      sub.unsubscribe();
+    };
+  }, [currentUserId, activeTab]);
+
+  // Periodic polling fallback for devices when Devices tab is open
   useEffect(() => {
     if (activeTab !== "devices") return;
 
     const interval = setInterval(() => {
       void fetchDevices();
-    }, 4000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [activeTab, fetchDevices]);
