@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import type { KeyStatus } from "@/lib/db/userApiKeyStore";
 import { subscribeToDeviceChannel } from "@/lib/realtime/deviceRealtime";
+import { getApprovedAppsList, type AllowedAppConfig } from "@/lib/constants/appAllowlist";
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -96,9 +97,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     type: "success" | "error" | "info";
     message: string;
   } | null>(null);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(true);
   const [pingingDeviceId, setPingingDeviceId] = useState<string | null>(null);
   const [devicePingResults, setDevicePingResults] = useState<Record<string, { status: string; latencyMs?: number; message?: string }>>({});
+  const [launchingDeviceId, setLaunchingDeviceId] = useState<string | null>(null);
+  const [selectedAppPerDevice, setSelectedAppPerDevice] = useState<Record<string, string>>({});
+  const [deviceLaunchResults, setDeviceLaunchResults] = useState<Record<string, { status: string; message: string }>>({});
   const pingStartTimesRef = useRef<Record<string, number>>({});
+  const approvedApps = useRef<AllowedAppConfig[]>(getApprovedAppsList()).current;
 
   // Fetch current API key & ElevenLabs status
   const fetchStatus = useCallback(async () => {
@@ -137,6 +143,8 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       }
     } catch (err) {
       console.error("Failed to load devices:", err);
+    } finally {
+      setIsLoadingDevices(false);
     }
   }, []);
 
@@ -182,18 +190,49 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       onCommandResult: (payload) => {
         const start = pingStartTimesRef.current[payload.deviceId];
         const latencyMs = start ? Date.now() - start : undefined;
-        setDevicePingResults((prev) => ({
-          ...prev,
-          [payload.deviceId]: {
-            status: payload.status,
-            latencyMs,
-            message:
-              payload.status === "SUCCESS"
-                ? `PONG received${latencyMs !== undefined ? ` in ${latencyMs}ms` : ""}`
-                : `Command ${payload.status}: ${payload.error || "Execution failed"}`,
-          },
-        }));
-        setPingingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
+        const resObj = payload.result as Record<string, unknown> | undefined;
+        const resType = String(resObj?.type || "");
+
+        if (resType === "PONG") {
+          setDevicePingResults((prev) => ({
+            ...prev,
+            [payload.deviceId]: {
+              status: payload.status,
+              latencyMs,
+              message: `PONG received${latencyMs !== undefined ? ` in ${latencyMs}ms` : ""}`,
+            },
+          }));
+          setPingingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
+        } else if (resType === "APP_LAUNCHED" || resType === "APP_NOT_INSTALLED" || resType === "APP_DISALLOWED" || resType === "APP_NOT_FOUND") {
+          const appName = String(resObj?.appId || "application");
+          const msg =
+            resType === "APP_LAUNCHED"
+              ? `App launch successful (${appName})`
+              : resType === "APP_NOT_INSTALLED"
+              ? `App not installed (${appName})`
+              : payload.error || `App launch ${payload.status}`;
+
+          setDeviceLaunchResults((prev) => ({
+            ...prev,
+            [payload.deviceId]: {
+              status: payload.status,
+              message: msg,
+            },
+          }));
+          setLaunchingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
+        } else {
+          // General command status fallback
+          setDevicePingResults((prev) => ({
+            ...prev,
+            [payload.deviceId]: {
+              status: payload.status,
+              latencyMs,
+              message: `Command ${payload.status}: ${payload.error || ""}`,
+            },
+          }));
+          setPingingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
+          setLaunchingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
+        }
       },
     });
 
@@ -323,6 +362,57 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         [deviceId]: { status: "FAILED", message: msg },
       }));
       setPingingDeviceId(null);
+    }
+  };
+
+  // Dispatch OPEN_APP command to companion device
+  const handleLaunchApp = async (deviceId: string) => {
+    const appId = selectedAppPerDevice[deviceId] || "whatsapp";
+    const appConfig = approvedApps.find((a) => a.appId === appId);
+    const appDisplayName = appConfig ? appConfig.name : appId;
+
+    setLaunchingDeviceId(deviceId);
+    setDeviceLaunchResults((prev) => ({
+      ...prev,
+      [deviceId]: { status: "PENDING", message: `Launching ${appDisplayName}...` },
+    }));
+
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/commands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          commandType: "OPEN_APP",
+          payload: { appId },
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setDeviceLaunchResults((prev) => ({
+          ...prev,
+          [deviceId]: {
+            status: "FAILED",
+            message: data.error || `Failed to launch ${appDisplayName}`,
+          },
+        }));
+        setLaunchingDeviceId(null);
+      } else {
+        setDeviceLaunchResults((prev) => ({
+          ...prev,
+          [deviceId]: {
+            status: "PENDING",
+            message: `Launch command dispatched to ${appDisplayName}, awaiting device confirmation...`,
+          },
+        }));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error";
+      setDeviceLaunchResults((prev) => ({
+        ...prev,
+        [deviceId]: { status: "FAILED", message: msg },
+      }));
+      setLaunchingDeviceId(null);
     }
   };
 
@@ -791,7 +881,20 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
               {/* Devices List */}
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {devices.length === 0 ? (
+                {isLoadingDevices ? (
+                  <div
+                    className="settings-subtext"
+                    style={{
+                      padding: "16px",
+                      textAlign: "center",
+                      background: "rgba(20, 10, 0, 0.4)",
+                      borderRadius: "4px",
+                      border: "1px dashed rgba(255, 170, 48, 0.25)",
+                    }}
+                  >
+                    Loading paired Android companion devices...
+                  </div>
+                ) : devices.length === 0 ? (
                   <div
                     className="settings-subtext"
                     style={{
@@ -840,11 +943,83 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                             </strong>
                           </span>
                         </div>
+
+                        {/* OPEN_APP Selector and Action */}
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "6px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "10px", color: "rgba(255, 255, 255, 0.6)", letterSpacing: "0.05em" }}>
+                            OPEN APP:
+                          </span>
+                          <select
+                            value={selectedAppPerDevice[dev.deviceId] || "whatsapp"}
+                            onChange={(e) =>
+                              setSelectedAppPerDevice((prev) => ({
+                                ...prev,
+                                [dev.deviceId]: e.target.value,
+                              }))
+                            }
+                            disabled={dev.connectionStatus !== "connected" || launchingDeviceId === dev.deviceId}
+                            style={{
+                              background: "rgba(0, 20, 30, 0.8)",
+                              border: "1px solid rgba(0, 240, 255, 0.3)",
+                              color: "#00f0ff",
+                              fontSize: "10px",
+                              padding: "2px 6px",
+                              borderRadius: "3px",
+                              outline: "none",
+                              cursor: dev.connectionStatus !== "connected" ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {approvedApps.map((app) => (
+                              <option key={app.appId} value={app.appId} style={{ background: "#0a1015", color: "#e0f7ff" }}>
+                                {app.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="hud-btn settings-btn"
+                            style={{
+                              height: "24px",
+                              fontSize: "9.5px",
+                              padding: "0 8px",
+                              borderColor: "rgba(0, 240, 255, 0.5)",
+                              color: "#00f0ff",
+                            }}
+                            onClick={() => handleLaunchApp(dev.deviceId)}
+                            disabled={launchingDeviceId === dev.deviceId || dev.connectionStatus !== "connected"}
+                            title={dev.connectionStatus !== "connected" ? "Device is offline" : "Launch application on device"}
+                          >
+                            {launchingDeviceId === dev.deviceId ? "LAUNCHING..." : "LAUNCH"}
+                          </button>
+                        </div>
+
+                        {/* Live Feedback Messages */}
+                        {deviceLaunchResults[dev.deviceId] && (
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              marginTop: "4px",
+                              color:
+                                deviceLaunchResults[dev.deviceId].status === "SUCCESS"
+                                  ? "#00ffcc"
+                                  : deviceLaunchResults[dev.deviceId].status === "FAILED"
+                                  ? "#ff4d4d"
+                                  : "#ffaa30",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            <span>📲</span>
+                            <span>{deviceLaunchResults[dev.deviceId].message}</span>
+                          </div>
+                        )}
+
                         {devicePingResults[dev.deviceId] && (
                           <div
                             style={{
                               fontSize: "11px",
-                              marginTop: "6px",
+                              marginTop: "4px",
                               color:
                                 devicePingResults[dev.deviceId].status === "SUCCESS"
                                   ? "#00ffcc"

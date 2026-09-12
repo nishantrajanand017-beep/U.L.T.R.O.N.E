@@ -1,5 +1,8 @@
 package com.ultron.companion.network
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import okhttp3.OkHttpClient
@@ -20,6 +23,8 @@ class UltronRealtimeManager(
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
 ) {
+    var appContext: Context? = null
+
     private var webSocket: WebSocket? = null
     private var isIntentionalClose = false
     private var reconnectAttempts = 0
@@ -389,33 +394,140 @@ class UltronRealtimeManager(
                 return
             }
 
-            // 4. Command allowlist validation (PING only in Phase 12 Step 1)
-            if (commandType != "PING") {
+            // 4. Command allowlist validation (PING and OPEN_APP supported)
+            if (commandType != "PING" && commandType != "OPEN_APP") {
                 broadcastCommandResult(
                     commandId = commandId,
                     status = "FAILED",
-                    error = "Unsupported commandType: '$commandType'. Only PING is supported in Phase 12 Step 1."
+                    error = "Unsupported commandType: '$commandType'. Only PING and OPEN_APP are supported."
                 )
                 return
             }
 
-            // 5. Execute PING command -> record in replay cache & respond with PONG
-            synchronized(processedCommandIds) {
-                processedCommandIds.add(commandId)
+            if (commandType == "PING") {
+                // Execute PING command -> record in replay cache & respond with PONG
+                synchronized(processedCommandIds) {
+                    processedCommandIds.add(commandId)
+                }
+
+                val pongResult = JSONObject().apply {
+                    put("type", "PONG")
+                }
+
+                broadcastCommandResult(
+                    commandId = commandId,
+                    status = "SUCCESS",
+                    result = pongResult
+                )
+
+                handler.post {
+                    onDeviceCommandProcessed?.invoke(commandId, "SUCCESS", pongResult)
+                }
+                return
             }
 
-            val pongResult = JSONObject().apply {
-                put("type", "PONG")
-            }
+            if (commandType == "OPEN_APP") {
+                val payloadObj = bPayload.optJSONObject("payload")
+                val appId = payloadObj?.optString("appId")?.trim()?.lowercase() ?: ""
+                val packageName = payloadObj?.optString("packageName")?.trim() ?: ""
 
-            broadcastCommandResult(
-                commandId = commandId,
-                status = "SUCCESS",
-                result = pongResult
-            )
+                // Defense-in-depth allowlist verification on Android
+                val expectedPackage = ALLOWED_PACKAGES[appId]
+                if (expectedPackage == null || (packageName.isNotEmpty() && packageName != expectedPackage)) {
+                    broadcastCommandResult(
+                        commandId = commandId,
+                        status = "FAILED",
+                        result = JSONObject().apply {
+                            put("type", "APP_DISALLOWED")
+                            put("appId", appId)
+                        },
+                        error = "Application '$appId' is not permitted on this device."
+                    )
+                    return
+                }
 
-            handler.post {
-                onDeviceCommandProcessed?.invoke(commandId, "SUCCESS", pongResult)
+                val ctx = appContext
+                if (ctx == null) {
+                    broadcastCommandResult(
+                        commandId = commandId,
+                        status = "FAILED",
+                        error = "Device context is not available for launching applications."
+                    )
+                    return
+                }
+
+                val pm = ctx.packageManager
+                val launchIntent = try {
+                    pm.getLaunchIntentForPackage(expectedPackage)
+                } catch (e: Exception) {
+                    null
+                }
+
+                if (launchIntent == null) {
+                    val notInstalledResult = JSONObject().apply {
+                        put("type", "APP_NOT_INSTALLED")
+                        put("appId", appId)
+                        put("packageName", expectedPackage)
+                    }
+                    broadcastCommandResult(
+                        commandId = commandId,
+                        status = "FAILED",
+                        result = notInstalledResult,
+                        error = "Application '$appId' ($expectedPackage) is not installed."
+                    )
+                    handler.post {
+                        onDeviceCommandProcessed?.invoke(commandId, "FAILED", notInstalledResult)
+                    }
+                    return
+                }
+
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    ctx.startActivity(launchIntent)
+
+                    // Successfully launched -> record in bounded replay cache
+                    synchronized(processedCommandIds) {
+                        processedCommandIds.add(commandId)
+                    }
+
+                    val successResult = JSONObject().apply {
+                        put("type", "APP_LAUNCHED")
+                        put("appId", appId)
+                        put("packageName", expectedPackage)
+                    }
+
+                    broadcastCommandResult(
+                        commandId = commandId,
+                        status = "SUCCESS",
+                        result = successResult
+                    )
+
+                    handler.post {
+                        onDeviceCommandProcessed?.invoke(commandId, "SUCCESS", successResult)
+                    }
+                } catch (e: ActivityNotFoundException) {
+                    broadcastCommandResult(
+                        commandId = commandId,
+                        status = "FAILED",
+                        result = JSONObject().apply {
+                            put("type", "APP_NOT_FOUND")
+                            put("appId", appId)
+                        },
+                        error = "Activity not found for application '$appId'."
+                    )
+                } catch (e: SecurityException) {
+                    broadcastCommandResult(
+                        commandId = commandId,
+                        status = "FAILED",
+                        error = "Security restriction prevented launching '$appId'."
+                    )
+                } catch (e: Exception) {
+                    broadcastCommandResult(
+                        commandId = commandId,
+                        status = "FAILED",
+                        error = "Failed to launch application '$appId'."
+                    )
+                }
             }
         } catch (e: Exception) {
             // Never crash when handling incoming commands
@@ -460,5 +572,14 @@ class UltronRealtimeManager(
 
     companion object {
         private const val HEARTBEAT_INTERVAL_MS = 25000L // 25 seconds
+
+        val ALLOWED_PACKAGES = mapOf(
+            "whatsapp" to "com.whatsapp",
+            "telegram" to "org.telegram.messenger",
+            "chrome" to "com.android.chrome",
+            "youtube" to "com.google.android.youtube",
+            "gmail" to "com.google.android.gm",
+            "settings" to "com.android.settings"
+        )
     }
 }

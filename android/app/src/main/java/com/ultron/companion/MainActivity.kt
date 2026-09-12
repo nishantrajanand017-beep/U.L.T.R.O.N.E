@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         preferences = DevicePreferences(this)
+        realtimeManager.appContext = applicationContext
 
         setupUI()
         setupRealtimeListener()
@@ -71,10 +72,18 @@ class MainActivity : AppCompatActivity() {
                 updateConnectionState(state, message, lastSeen)
             }
         }
-        realtimeManager.onDeviceCommandProcessed = { cmdId, status, _ ->
+        realtimeManager.onDeviceCommandProcessed = { cmdId, status, result ->
             runOnUiThread {
                 binding.tvStatusMessage.visibility = View.VISIBLE
-                binding.tvStatusMessage.text = "Processed command $cmdId: $status (PONG)"
+                val type = result?.optString("type") ?: ""
+                val appId = result?.optString("appId") ?: ""
+                val actionDesc = when (type) {
+                    "PONG" -> "PONG acknowledged"
+                    "APP_LAUNCHED" -> "Launched $appId"
+                    "APP_NOT_INSTALLED" -> "$appId not installed"
+                    else -> "$status $type"
+                }
+                binding.tvStatusMessage.text = "Command $cmdId: $actionDesc"
             }
         }
     }

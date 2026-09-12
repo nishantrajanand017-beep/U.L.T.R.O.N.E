@@ -21,7 +21,12 @@ export interface DeviceEventPayload {
   data?: unknown;
 }
 
-export type CommandType = "PING";
+export type CommandType = "PING" | "OPEN_APP";
+
+export interface OpenAppPayload {
+  appId: string;
+  packageName?: string;
+}
 
 export type CommandStatus =
   | "PENDING"

@@ -12,7 +12,8 @@
     "test:p11": "npx tsx scripts/test-phase11.ts",
     "test:p11-5": "npx tsx scripts/test-phase11-5.ts",
     "test:p12-1": "npx tsx scripts/test-phase12-1.ts",
-    "test:all": "npx tsx scripts/test-phase9.ts && npx tsx scripts/test-phase10.ts && npx tsx scripts/test-phase11.ts && npx tsx scripts/test-phase11-5.ts && npx tsx scripts/test-phase12-1.ts"
+    "test:p12-2": "npx tsx scripts/test-phase12-2.ts",
+    "test:all": "npx tsx scripts/test-phase9.ts && npx tsx scripts/test-phase10.ts && npx tsx scripts/test-phase11.ts && npx tsx scripts/test-phase11-5.ts && npx tsx scripts/test-phase12-1.ts && npx tsx scripts/test-phase12-2.ts"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",

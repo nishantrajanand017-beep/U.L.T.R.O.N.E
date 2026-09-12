@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { getUserIdFromRequest } from "@/lib/auth/session";
 import { listUserDevices, getSupabase } from "@/lib/db/deviceStore";
+import { resolveApprovedApp } from "@/lib/constants/appAllowlist";
 import type { DeviceCommand } from "@/lib/realtime/deviceRealtime";
 
 export async function POST(
@@ -55,13 +56,48 @@ export async function POST(
       );
     }
 
-    if (reqBody.commandType !== "PING") {
+    const commandType = reqBody.commandType;
+    if (commandType !== "PING" && commandType !== "OPEN_APP") {
       return NextResponse.json(
         {
-          error: `Unsupported commandType: "${String(reqBody.commandType)}". Only "PING" is supported in Phase 12 Step 1.`,
+          error: `Unsupported commandType: "${String(commandType)}". Only "PING" and "OPEN_APP" are supported.`,
         },
         { status: 400 }
       );
+    }
+
+    let commandPayload: Record<string, unknown> = {};
+
+    if (commandType === "OPEN_APP") {
+      const rawPayload = reqBody.payload as Record<string, unknown> | undefined;
+      const rawAppId = rawPayload?.appId;
+
+      if (!rawAppId || typeof rawAppId !== "string" || !rawAppId.trim()) {
+        return NextResponse.json(
+          { error: "Invalid payload: 'appId' string is required for OPEN_APP." },
+          { status: 400 }
+        );
+      }
+
+      const approvedApp = resolveApprovedApp(rawAppId);
+      if (!approvedApp) {
+        return NextResponse.json(
+          {
+            error: `Application '${rawAppId}' is not on the approved application allowlist.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Explicitly inject server-verified package name; ignore any client-supplied packageName
+      commandPayload = {
+        appId: approvedApp.appId,
+        packageName: approvedApp.packageName,
+      };
+    } else {
+      commandPayload = (reqBody.payload && typeof reqBody.payload === "object"
+        ? reqBody.payload
+        : {}) as Record<string, unknown>;
     }
 
     // 4. Generate command ID and timestamps (45s TTL)
@@ -73,10 +109,10 @@ export async function POST(
     const command: DeviceCommand = {
       commandId,
       targetDeviceId: deviceId,
-      commandType: "PING",
+      commandType,
       createdAt,
       expiresAt,
-      payload: (reqBody.payload && typeof reqBody.payload === "object" ? reqBody.payload : {}) as Record<string, unknown>,
+      payload: commandPayload,
       source: "ultron-web",
     };
 
