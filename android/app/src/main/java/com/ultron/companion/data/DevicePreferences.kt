@@ -8,21 +8,49 @@ import androidx.security.crypto.MasterKey
 
 class DevicePreferences(context: Context) {
 
-    private val prefs: SharedPreferences = try {
+    var isEncryptedStorage: Boolean = false
+        private set
+
+    private val prefs: SharedPreferences = run {
+        var securePrefs: SharedPreferences? = null
+        try {
+            securePrefs = createEncryptedPrefs(context)
+            isEncryptedStorage = true
+        } catch (t: Throwable) {
+            android.util.Log.w("ULTRON_PREFS", "Encrypted storage init failed: ${t.javaClass.simpleName}. Attempting key recovery...")
+            try {
+                // Recover from stale/corrupted keyset (common across re-installs on API 34+)
+                context.deleteSharedPreferences("ultron_secure_prefs")
+                securePrefs = createEncryptedPrefs(context)
+                isEncryptedStorage = true
+            } catch (t2: Throwable) {
+                android.util.Log.w("ULTRON_PREFS", "Encrypted storage recovery failed. Falling back to application-private storage.")
+                isEncryptedStorage = false
+            }
+        }
+
+        if (securePrefs != null && isEncryptedStorage) {
+            securePrefs
+        } else {
+            val fallback = context.getSharedPreferences("ultron_device_prefs", Context.MODE_PRIVATE)
+            // Security requirement: if encrypted storage is unavailable, invalidate plaintext token
+            fallback.edit().remove(KEY_DEVICE_AUTH_TOKEN).apply()
+            fallback
+        }
+    }
+
+    private fun createEncryptedPrefs(context: Context): SharedPreferences {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
 
-        EncryptedSharedPreferences.create(
+        return EncryptedSharedPreferences.create(
             context,
             "ultron_secure_prefs",
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
-    } catch (e: Exception) {
-        // Fallback to standard private preferences for testing/emulator compatibility
-        context.getSharedPreferences("ultron_device_prefs", Context.MODE_PRIVATE)
     }
 
     var serverUrl: String

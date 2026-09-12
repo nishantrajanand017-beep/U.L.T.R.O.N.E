@@ -36,8 +36,12 @@ class HeartbeatService : Service() {
         preferences = DevicePreferences(this)
         createNotificationChannel()
 
-        val notification = createNotification("ULTRON Companion Active", "Maintaining secure hardware link")
-        startForeground(NOTIFICATION_ID, notification)
+        val notification = createNotification("ULTRON Companion Active", "Maintaining cloud companion link")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         realtimeManager.onStateChanged = { state, msg, lastSeen ->
             val statusText = when (state) {
@@ -172,19 +176,27 @@ class HeartbeatService : Service() {
         const val ACTION_DISCONNECT = "com.ultron.companion.ACTION_DISCONNECT"
 
         fun start(context: Context) {
+            val prefs = DevicePreferences(context)
+            if (!prefs.isPaired) return
+
             val intent = Intent(context, HeartbeatService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (t: Throwable) {
+                android.util.Log.e("ULTRON_HEARTBEAT_SVC", "Could not start HeartbeatService: ${t.message}")
             }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, HeartbeatService::class.java).apply {
-                action = ACTION_DISCONNECT
+            try {
+                context.stopService(Intent(context, HeartbeatService::class.java))
+            } catch (t: Throwable) {
+                // Completely safe no-op if service is not running
             }
-            context.startService(intent)
         }
     }
 }
