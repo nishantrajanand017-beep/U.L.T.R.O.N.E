@@ -42,8 +42,7 @@ class HeartbeatService : Service() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -140,7 +139,6 @@ class HeartbeatService : Service() {
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        super.onTimeout(startId, fgsType)
         android.util.Log.w("ULTRON_HEARTBEAT_SVC", "FGS onTimeout reached for type $fgsType (startId: $startId). Stopping service gracefully per Android 15 contract.")
         stopSelf()
     }
