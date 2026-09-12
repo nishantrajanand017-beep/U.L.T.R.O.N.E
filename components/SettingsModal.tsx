@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { KeyStatus } from "@/lib/db/userApiKeyStore";
 import { subscribeToDeviceChannel } from "@/lib/realtime/deviceRealtime";
 
@@ -96,6 +96,9 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     type: "success" | "error" | "info";
     message: string;
   } | null>(null);
+  const [pingingDeviceId, setPingingDeviceId] = useState<string | null>(null);
+  const [devicePingResults, setDevicePingResults] = useState<Record<string, { status: string; latencyMs?: number; message?: string }>>({});
+  const pingStartTimesRef = useRef<Record<string, number>>({});
 
   // Fetch current API key & ElevenLabs status
   const fetchStatus = useCallback(async () => {
@@ -175,6 +178,22 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
               : d
           )
         );
+      },
+      onCommandResult: (payload) => {
+        const start = pingStartTimesRef.current[payload.deviceId];
+        const latencyMs = start ? Date.now() - start : undefined;
+        setDevicePingResults((prev) => ({
+          ...prev,
+          [payload.deviceId]: {
+            status: payload.status,
+            latencyMs,
+            message:
+              payload.status === "SUCCESS"
+                ? `PONG received${latencyMs !== undefined ? ` in ${latencyMs}ms` : ""}`
+                : `Command ${payload.status}: ${payload.error || "Execution failed"}`,
+          },
+        }));
+        setPingingDeviceId((curr) => (curr === payload.deviceId ? null : curr));
       },
     });
 
@@ -266,6 +285,44 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       setDevicesFeedback({ type: "error", message: msg });
     } finally {
       setUnpairingDeviceId(null);
+    }
+  };
+
+  // Dispatch PING command to companion device
+  const handlePingDevice = async (deviceId: string) => {
+    setPingingDeviceId(deviceId);
+    pingStartTimesRef.current[deviceId] = Date.now();
+    setDevicePingResults((prev) => ({
+      ...prev,
+      [deviceId]: { status: "PENDING", message: "Dispatching PING..." },
+    }));
+
+    try {
+      const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/commands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commandType: "PING", payload: {} }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDevicePingResults((prev) => ({
+          ...prev,
+          [deviceId]: { status: "FAILED", message: data.error || "Failed to dispatch PING" },
+        }));
+        setPingingDeviceId(null);
+      } else {
+        setDevicePingResults((prev) => ({
+          ...prev,
+          [deviceId]: { status: "PENDING", message: "PING sent, awaiting companion PONG..." },
+        }));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Network error";
+      setDevicePingResults((prev) => ({
+        ...prev,
+        [deviceId]: { status: "FAILED", message: msg },
+      }));
+      setPingingDeviceId(null);
     }
   };
 
@@ -783,17 +840,55 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                             </strong>
                           </span>
                         </div>
+                        {devicePingResults[dev.deviceId] && (
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              marginTop: "6px",
+                              color:
+                                devicePingResults[dev.deviceId].status === "SUCCESS"
+                                  ? "#00ffcc"
+                                  : devicePingResults[dev.deviceId].status === "FAILED"
+                                  ? "#ff4d4d"
+                                  : "#ffaa30",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            <span>⚡</span>
+                            <span>{devicePingResults[dev.deviceId].message}</span>
+                          </div>
+                        )}
                       </div>
 
-                      <button
-                        type="button"
-                        className="hud-btn settings-btn settings-delete-btn"
-                        style={{ height: "32px", fontSize: "10px", padding: "0 10px" }}
-                        onClick={() => handleUnpairDevice(dev.deviceId)}
-                        disabled={unpairingDeviceId === dev.deviceId}
-                      >
-                        {unpairingDeviceId === dev.deviceId ? "UNPAIRING..." : "UNPAIR"}
-                      </button>
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <button
+                          type="button"
+                          className="hud-btn settings-btn"
+                          style={{
+                            height: "32px",
+                            fontSize: "10px",
+                            padding: "0 12px",
+                            borderColor: "rgba(0, 255, 200, 0.4)",
+                            color: "#00ffcc",
+                          }}
+                          onClick={() => handlePingDevice(dev.deviceId)}
+                          disabled={pingingDeviceId === dev.deviceId || dev.connectionStatus !== "connected"}
+                          title={dev.connectionStatus !== "connected" ? "Device is offline" : "Send PING command"}
+                        >
+                          {pingingDeviceId === dev.deviceId ? "PINGING..." : "PING"}
+                        </button>
+                        <button
+                          type="button"
+                          className="hud-btn settings-btn settings-delete-btn"
+                          style={{ height: "32px", fontSize: "10px", padding: "0 10px" }}
+                          onClick={() => handleUnpairDevice(dev.deviceId)}
+                          disabled={unpairingDeviceId === dev.deviceId}
+                        >
+                          {unpairingDeviceId === dev.deviceId ? "UNPAIRING..." : "UNPAIR"}
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}

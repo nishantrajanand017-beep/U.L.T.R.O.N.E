@@ -21,16 +21,48 @@ export interface DeviceEventPayload {
   data?: unknown;
 }
 
+export type CommandType = "PING";
+
+export type CommandStatus =
+  | "PENDING"
+  | "RECEIVED"
+  | "EXECUTING"
+  | "SUCCESS"
+  | "FAILED"
+  | "EXPIRED"
+  | "DUPLICATE";
+
+export interface DeviceCommand<T = Record<string, unknown>> {
+  commandId: string;
+  targetDeviceId: string;
+  commandType: CommandType;
+  createdAt: string;
+  expiresAt: number;
+  payload: T;
+  source: string;
+}
+
+export interface DeviceCommandResult<T = unknown> {
+  commandId: string;
+  deviceId: string;
+  status: CommandStatus;
+  result?: T;
+  error?: string;
+  completedAt: string;
+}
+
 export interface DeviceRealtimeCallbacks {
   onStatusChange?: (payload: DeviceStatusPayload) => void;
   onHeartbeat?: (payload: DeviceHeartbeatPayload) => void;
   onEvent?: (payload: DeviceEventPayload) => void;
+  onCommandResult?: (payload: DeviceCommandResult) => void;
   onConnectionChange?: (status: "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR") => void;
 }
 
 export interface DeviceRealtimeSubscription {
   channel: RealtimeChannel | null;
   sendCommand: (deviceId: string, action: string, params?: Record<string, unknown>) => Promise<boolean>;
+  sendDeviceCommand: (command: DeviceCommand) => Promise<boolean>;
   sendPing: () => Promise<boolean>;
   unsubscribe: () => void;
 }
@@ -47,6 +79,7 @@ export function subscribeToDeviceChannel(
     return {
       channel: null,
       sendCommand: async () => false,
+      sendDeviceCommand: async () => false,
       sendPing: async () => false,
       unsubscribe: () => {},
     };
@@ -65,6 +98,7 @@ export function subscribeToDeviceChannel(
     return {
       channel: null,
       sendCommand: async () => false,
+      sendDeviceCommand: async () => false,
       sendPing: async () => false,
       unsubscribe: () => {},
     };
@@ -98,6 +132,11 @@ export function subscribeToDeviceChannel(
         callbacks.onEvent(event.payload as DeviceEventPayload);
       }
     })
+    .on("broadcast", { event: "device_command_result" }, (event) => {
+      if (callbacks.onCommandResult && event.payload) {
+        callbacks.onCommandResult(event.payload as DeviceCommandResult);
+      }
+    })
     .subscribe((status) => {
       if (callbacks.onConnectionChange) {
         callbacks.onConnectionChange(status as "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR");
@@ -124,6 +163,22 @@ export function subscribeToDeviceChannel(
       return resp === "ok";
     } catch (err) {
       console.error("[ULTRON Realtime] Failed to send command:", err);
+      return false;
+    }
+  };
+
+  const sendDeviceCommand = async (
+    command: DeviceCommand
+  ): Promise<boolean> => {
+    try {
+      const resp = await channel.send({
+        type: "broadcast",
+        event: "device_command",
+        payload: command,
+      });
+      return resp === "ok";
+    } catch (err) {
+      console.error("[ULTRON Realtime] Failed to send device command:", err);
       return false;
     }
   };
@@ -155,6 +210,7 @@ export function subscribeToDeviceChannel(
   return {
     channel,
     sendCommand,
+    sendDeviceCommand,
     sendPing,
     unsubscribe,
   };

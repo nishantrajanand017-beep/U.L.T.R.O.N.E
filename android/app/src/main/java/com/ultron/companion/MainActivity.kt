@@ -71,6 +71,12 @@ class MainActivity : AppCompatActivity() {
                 updateConnectionState(state, message, lastSeen)
             }
         }
+        realtimeManager.onDeviceCommandProcessed = { cmdId, status, _ ->
+            runOnUiThread {
+                binding.tvStatusMessage.visibility = View.VISIBLE
+                binding.tvStatusMessage.text = "Processed command $cmdId: $status (PONG)"
+            }
+        }
     }
 
     private fun refreshState() {

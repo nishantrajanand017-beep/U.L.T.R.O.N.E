@@ -8,6 +8,9 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.time.Instant
+import java.util.Collections
+import java.util.LinkedHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
@@ -28,6 +31,18 @@ class UltronRealtimeManager(
 
     var onStateChanged: ((state: ConnectionState, message: String?, lastSeenAt: String?) -> Unit)? = null
     var onCommandReceived: ((commandId: String, action: String, params: JSONObject?) -> Unit)? = null
+    var onDeviceCommandProcessed: ((commandId: String, status: String, result: JSONObject?) -> Unit)? = null
+
+    // Bounded replay protection cache: LRU eviction, max 500 entries
+    private val processedCommandIds = Collections.synchronizedSet(
+        Collections.newSetFromMap(
+            object : LinkedHashMap<String, Boolean>(500, 0.75f, true) {
+                override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean {
+                    return size > 500
+                }
+            }
+        )
+    )
 
     private val heartbeatRunnable = object : Runnable {
         override fun run() {
@@ -192,6 +207,8 @@ class UltronRealtimeManager(
                     handler.post {
                         onCommandReceived?.invoke(cmdId, action, params)
                     }
+                } else if (bEvent == "device_command" && bPayload != null) {
+                    handleDeviceCommand(bPayload)
                 }
             }
             "phx_error", "phx_close" -> {
@@ -328,6 +345,117 @@ class UltronRealtimeManager(
         }
         webSocket = null
         onStateChanged?.invoke(ConnectionState.STANDBY, "Disconnected", null)
+    }
+
+    private fun handleDeviceCommand(bPayload: JSONObject) {
+        try {
+            val commandId = bPayload.optString("commandId").trim()
+            val targetDeviceId = bPayload.optString("targetDeviceId").trim()
+            val commandType = bPayload.optString("commandType").trim()
+            val expiresAt = bPayload.optLong("expiresAt", 0L)
+            val currentDeviceId = currentConfig?.deviceId?.trim() ?: ""
+
+            // 1. Target device isolation: compare targetDeviceId with local deviceId
+            // If they do not match, silently ignore the command. Do not process, do not acknowledge, do not crash.
+            if (currentDeviceId.isEmpty() || targetDeviceId != currentDeviceId) {
+                return
+            }
+
+            if (commandId.isEmpty()) {
+                return
+            }
+
+            // 2. Expiry check: compare server expiresAt with current local time
+            val currentTime = System.currentTimeMillis()
+            if (expiresAt > 0 && currentTime > expiresAt) {
+                broadcastCommandResult(
+                    commandId = commandId,
+                    status = "EXPIRED",
+                    error = "Command expired before processing."
+                )
+                return
+            }
+
+            // 3. Replay protection check
+            val isDuplicate = synchronized(processedCommandIds) {
+                processedCommandIds.contains(commandId)
+            }
+            if (isDuplicate) {
+                broadcastCommandResult(
+                    commandId = commandId,
+                    status = "DUPLICATE",
+                    error = "Command has already been processed."
+                )
+                return
+            }
+
+            // 4. Command allowlist validation (PING only in Phase 12 Step 1)
+            if (commandType != "PING") {
+                broadcastCommandResult(
+                    commandId = commandId,
+                    status = "FAILED",
+                    error = "Unsupported commandType: '$commandType'. Only PING is supported in Phase 12 Step 1."
+                )
+                return
+            }
+
+            // 5. Execute PING command -> record in replay cache & respond with PONG
+            synchronized(processedCommandIds) {
+                processedCommandIds.add(commandId)
+            }
+
+            val pongResult = JSONObject().apply {
+                put("type", "PONG")
+            }
+
+            broadcastCommandResult(
+                commandId = commandId,
+                status = "SUCCESS",
+                result = pongResult
+            )
+
+            handler.post {
+                onDeviceCommandProcessed?.invoke(commandId, "SUCCESS", pongResult)
+            }
+        } catch (e: Exception) {
+            // Never crash when handling incoming commands
+        }
+    }
+
+    private fun broadcastCommandResult(
+        commandId: String,
+        status: String,
+        result: JSONObject? = null,
+        error: String? = null
+    ) {
+        val ws = webSocket ?: return
+        val config = currentConfig ?: return
+        if (config.provider != "supabase") return
+
+        try {
+            val bRef = messageRef.getAndIncrement().toString()
+            val nowIso = Instant.now().toString()
+            val broadcastMsg = JSONObject().apply {
+                put("topic", config.phoenixTopic)
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "device_command_result")
+                    put("payload", JSONObject().apply {
+                        put("commandId", commandId)
+                        put("deviceId", config.deviceId)
+                        put("status", status)
+                        if (result != null) put("result", result)
+                        if (error != null) put("error", error)
+                        put("completedAt", nowIso)
+                    })
+                })
+                put("ref", bRef)
+            }
+            ws.send(broadcastMsg.toString())
+        } catch (e: Exception) {
+            // Never crash on send failure
+        }
     }
 
     companion object {

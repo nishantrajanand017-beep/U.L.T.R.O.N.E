@@ -125,7 +125,7 @@ function mapDeviceToRow(device: StoredDevice): DbDeviceRow {
  * Initializes or returns the Supabase client for device storage.
  */
 let cachedSupabaseClient: SupabaseClient | null = null;
-function getSupabase(): SupabaseClient | null {
+export function getSupabase(): SupabaseClient | null {
   if (cachedSupabaseClient) return cachedSupabaseClient;
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
