@@ -5,84 +5,170 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Outer Cyan Segmented Ring -->
+    <!-- Cranial Helmet Dome & Forehead Crest -->
     <path
-        android:pathData="M 54,12 A 42,42 0 0,1 96,54"
-        android:strokeColor="#00F0FF"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 96,54 A 42,42 0 0,1 54,96"
-        android:strokeColor="#0080FF"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 54,96 A 42,42 0 0,1 12,54"
-        android:strokeColor="#00F0FF"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 12,54 A 42,42 0 0,1 54,12"
-        android:strokeColor="#0080FF"
-        android:strokeWidth="1.6"
-        android:strokeLineCap="round" />
-
-    <!-- Cardinal Targeting Ticks -->
-    <path
-        android:pathData="M 54,8 L 54,14 M 54,94 L 54,100 M 8,54 L 14,54 M 94,54 L 100,54"
-        android:strokeColor="#00E5FF"
-        android:strokeWidth="1.4"
-        android:strokeLineCap="square" />
-
-    <!-- Mid Amber/Gold Reactor Arcs -->
-    <path
-        android:pathData="M 33,25 A 33,33 0 0,1 75,25"
-        android:strokeColor="#FFC700"
-        android:strokeWidth="2.2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 83,33 A 33,33 0 0,1 83,75"
-        android:strokeColor="#FF8800"
-        android:strokeWidth="2.2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 75,83 A 33,33 0 0,1 33,83"
-        android:strokeColor="#FFC700"
-        android:strokeWidth="2.2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M 25,75 A 33,33 0 0,1 25,33"
-        android:strokeColor="#FF8800"
-        android:strokeWidth="2.2"
-        android:strokeLineCap="round" />
-
-    <!-- Inner Cyan Containment Circle -->
-    <path
-        android:pathData="M 54,30 A 24,24 0 1,1 53.9,30"
-        android:strokeColor="#00E5FF"
-        android:strokeWidth="1.2" />
-
-    <!-- Inner Reactor Core Singularity Rings -->
-    <path
-        android:pathData="M 54,39 A 15,15 0 1,1 53.9,39"
-        android:fillColor="#1500F0FF"
-        android:strokeColor="#00F0FF"
-        android:strokeWidth="1.0" />
+        android:pathData="M 48,22 L 60,22 L 64,30 L 54,34 L 44,30 Z"
+        android:fillColor="#243042"
+        android:strokeColor="#4A5E7E"
+        android:strokeWidth="0.8" />
 
     <path
-        android:pathData="M 54,45 A 9,9 0 1,1 53.9,45"
-        android:fillColor="#4000F0FF"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.2" />
+        android:pathData="M 44,30 L 54,34 L 54,41 L 38,38 L 34,31 Z"
+        android:fillColor="#1B2433"
+        android:strokeColor="#384964"
+        android:strokeWidth="0.6" />
 
-    <!-- White-Hot Nuclear Center -->
     <path
-        android:pathData="M 54,49 A 5,5 0 1,1 53.9,49"
+        android:pathData="M 64,30 L 54,34 L 54,41 L 70,38 L 74,31 Z"
+        android:fillColor="#1B2433"
+        android:strokeColor="#384964"
+        android:strokeWidth="0.6" />
+
+    <!-- Lateral Ear / Audio Sensor Shells -->
+    <path
+        android:pathData="M 28,38 L 33,35 L 34,56 L 29,53 Z"
+        android:fillColor="#182230"
+        android:strokeColor="#2E3F57"
+        android:strokeWidth="0.8" />
+
+    <path
+        android:pathData="M 80,38 L 75,35 L 74,56 L 79,53 Z"
+        android:fillColor="#182230"
+        android:strokeColor="#2E3F57"
+        android:strokeWidth="0.8" />
+
+    <!-- Aggressive Overhanging Titanium Brow Plates -->
+    <path
+        android:pathData="M 33,39 L 52,43 L 52,47 L 35,44 Z"
+        android:fillColor="#344660"
+        android:strokeColor="#647E9E"
+        android:strokeWidth="0.8" />
+
+    <path
+        android:pathData="M 75,39 L 56,43 L 56,47 L 73,44 Z"
+        android:fillColor="#344660"
+        android:strokeColor="#647E9E"
+        android:strokeWidth="0.8" />
+
+    <!-- Recessed Shadowed Eye Sockets -->
+    <path
+        android:pathData="M 35,46 L 51,46 L 49,52 L 36,50 Z"
+        android:fillColor="#060A12" />
+
+    <path
+        android:pathData="M 73,46 L 57,46 L 59,52 L 72,50 Z"
+        android:fillColor="#060A12" />
+
+    <!-- Glowing Cyan Ocular Units (Narrow Menacing Slits) -->
+    <path
+        android:pathData="M 37,48 L 49,48.5 L 48,51 L 38,50 Z"
+        android:fillColor="#00F0FF" />
+
+    <path
+        android:pathData="M 39,49 L 47,49.5 L 46,50.5 L 40,50 Z"
         android:fillColor="#FFFFFF" />
 
-    <!-- Diamond HUD Crosshair -->
     <path
-        android:pathData="M 54,48 L 60,54 L 54,60 L 48,54 Z"
-        android:strokeColor="#00F0FF"
+        android:pathData="M 71,48 L 59,48.5 L 60,51 L 70,50 Z"
+        android:fillColor="#00F0FF" />
+
+    <path
+        android:pathData="M 69,49 L 61,49.5 L 62,50.5 L 68,50 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Nasal Bridge & Midface Armor -->
+    <path
+        android:pathData="M 52,43 L 56,43 L 57,60 L 54,64 L 51,60 Z"
+        android:fillColor="#29374B"
+        android:strokeColor="#526A8C"
         android:strokeWidth="0.8" />
+
+    <!-- Sharp Angular Cheek Plates -->
+    <path
+        android:pathData="M 31,44 L 37,44 L 43,59 L 36,66 L 27,53 Z"
+        android:fillColor="#212C3C"
+        android:strokeColor="#455B7B"
+        android:strokeWidth="0.8" />
+
+    <path
+        android:pathData="M 77,44 L 71,44 L 65,59 L 72,66 L 81,53 Z"
+        android:fillColor="#212C3C"
+        android:strokeColor="#455B7B"
+        android:strokeWidth="0.8" />
+
+    <!-- Subtle Crimson Heat Dissipation Micro-Vents -->
+    <path
+        android:pathData="M 35,59 L 41,56 L 42,58 L 36,61 Z"
+        android:fillColor="#FF2A4D" />
+
+    <path
+        android:pathData="M 73,59 L 67,56 L 66,58 L 72,61 Z"
+        android:fillColor="#FF2A4D" />
+
+    <path
+        android:pathData="M 37,63 L 42,61 L 42.5,62.5 L 37.5,64.5 Z"
+        android:fillColor="#FF385C" />
+
+    <path
+        android:pathData="M 71,63 L 66,61 L 65.5,62.5 L 70.5,64.5 Z"
+        android:fillColor="#FF385C" />
+
+    <!-- Segmented Mandible Grill (Vertical Cooling Vents) -->
+    <path
+        android:pathData="M 47,67 L 61,67 L 60,72 L 48,72 Z"
+        android:fillColor="#080C14" />
+
+    <path
+        android:pathData="M 51,67 L 51,72 M 54,67 L 54,72 M 57,67 L 57,72"
+        android:strokeColor="#243347"
+        android:strokeWidth="0.8" />
+
+    <!-- Lower Mandible & Angled Jaw Armor -->
+    <path
+        android:pathData="M 36,66 L 47,73 L 47,79 L 41,76 L 36,70 Z"
+        android:fillColor="#1B2332"
+        android:strokeColor="#3F526F"
+        android:strokeWidth="0.8" />
+
+    <path
+        android:pathData="M 72,66 L 61,73 L 61,79 L 67,76 L 72,70 Z"
+        android:fillColor="#1B2332"
+        android:strokeColor="#3F526F"
+        android:strokeWidth="0.8" />
+
+    <!-- Central Chiseled Titanium Chin Plate -->
+    <path
+        android:pathData="M 47,74 L 61,74 L 59,83 L 54,86 L 49,83 Z"
+        android:fillColor="#2D3C52"
+        android:strokeColor="#5E78A0"
+        android:strokeWidth="0.8" />
+
+    <path
+        android:pathData="M 51,76 L 57,76 L 56,81 L 54,83 L 52,81 Z"
+        android:fillColor="#415573" />
+
+    <!-- Specular Highlight Lines for 3D Metallic Precision -->
+    <path
+        android:pathData="M 48,23 L 54,22 L 60,23"
+        android:strokeColor="#8DA7CB"
+        android:strokeWidth="0.7"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M 28,52 L 36,66"
+        android:strokeColor="#7491BA"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M 80,52 L 72,66"
+        android:strokeColor="#7491BA"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round" />
+
+    <path
+        android:pathData="M 49,83 L 54,86 L 59,83"
+        android:strokeColor="#94B1D6"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round" />
 </vector>

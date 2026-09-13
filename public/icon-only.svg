@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<svg viewBox="0 0 840 240" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 512 512" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="bgGlow" cx="20%" cy="50%" r="75%">
+    <radialGradient id="bgGlow" cx="50%" cy="45%" r="65%">
       <stop offset="0%" stop-color="#0E1726" />
-      <stop offset="60%" stop-color="#060A12" />
-      <stop offset="100%" stop-color="#030509" />
+      <stop offset="50%" stop-color="#060A12" />
+      <stop offset="100%" stop-color="#020408" />
     </radialGradient>
 
     <linearGradient id="titaniumGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -30,91 +30,67 @@
       <stop offset="100%" stop-color="#D6183A" />
     </linearGradient>
 
-    <filter id="cyanGlow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="4" result="blur" />
+    <filter id="cyanGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur1" />
+      <feGaussianBlur stdDeviation="12" result="blur2" />
       <feMerge>
-        <feMergeNode in="blur" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
         <feMergeNode in="SourceGraphic" />
       </feMerge>
     </filter>
   </defs>
 
-  <!-- Background Base -->
-  <rect width="840" height="240" rx="20" fill="url(#bgGlow)" stroke="#16253B" stroke-width="1.5" />
+  <!-- Dark Obsidian Base -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGlow)" stroke="#1A2B42" stroke-width="2" />
 
-  <!-- Left: Robotic Face (Scaled to 180x180, centered around x=120, y=120) -->
-  <g transform="translate(15, 12) scale(0.42)">
-    <!-- Helmet Dome -->
+  <!-- ULTRON Robotic Face -->
+  <g transform="translate(0, 0)">
     <polygon points="228,85 284,85 304,124 256,144 208,124" fill="url(#titaniumGrad)" stroke="#4F678C" stroke-width="2.5" />
     <polygon points="208,124 256,144 256,182 178,168 158,132" fill="url(#gunmetalGrad)" stroke="#394C66" stroke-width="2" />
     <polygon points="304,124 256,144 256,182 334,168 354,132" fill="url(#gunmetalGrad)" stroke="#394C66" stroke-width="2" />
 
-    <!-- Lateral Ears -->
     <polygon points="128,165 154,152 158,252 134,238" fill="#131B27" stroke="#2D3E56" stroke-width="2.5" />
     <polygon points="384,165 358,152 354,252 378,238" fill="#131B27" stroke="#2D3E56" stroke-width="2.5" />
     <circle cx="144" cy="202" r="8" fill="#080D14" stroke="#00E5FF" stroke-width="1.5" opacity="0.6" />
     <circle cx="368" cy="202" r="8" fill="#080D14" stroke="#00E5FF" stroke-width="1.5" opacity="0.6" />
 
-    <!-- Forehead & Brow -->
     <polygon points="152,170 246,188 246,206 160,192" fill="#32455F" stroke="#6885AC" stroke-width="2.5" />
     <polygon points="360,170 266,188 266,206 352,192" fill="#32455F" stroke="#6885AC" stroke-width="2.5" />
 
-    <!-- Eye Sockets & Glowing Cyan Eyes -->
     <polygon points="162,204 242,204 232,234 168,224" fill="#05080E" />
     <polygon points="350,204 270,204 280,234 344,224" fill="#05080E" />
+
     <polygon points="172,213 230,215 224,228 178,223" fill="url(#cyanEnergy)" filter="url(#cyanGlow)" />
     <polygon points="184,216 220,218 216,225 188,223" fill="#FFFFFF" filter="url(#cyanGlow)" />
+
     <polygon points="340,213 282,215 288,228 334,223" fill="url(#cyanEnergy)" filter="url(#cyanGlow)" />
     <polygon points="328,216 292,218 296,225 324,223" fill="#FFFFFF" filter="url(#cyanGlow)" />
 
-    <!-- Nasal Bridge & Cheeks -->
     <polygon points="246,188 266,188 272,274 256,294 240,274" fill="url(#titaniumGrad)" stroke="#536E94" stroke-width="2.5" />
+
     <polygon points="144,194 172,194 200,268 168,304 126,242" fill="url(#gunmetalGrad)" stroke="#455C7E" stroke-width="2.5" />
     <polygon points="368,194 340,194 312,268 344,304 386,242" fill="url(#gunmetalGrad)" stroke="#455C7E" stroke-width="2.5" />
 
-    <!-- Crimson Vents -->
     <polygon points="160,268 190,254 195,263 165,277" fill="url(#crimsonHeat)" />
     <polygon points="352,268 322,254 317,263 347,277" fill="url(#crimsonHeat)" />
+    <polygon points="170,288 194,277 197,284 173,295" fill="url(#crimsonHeat)" />
+    <polygon points="342,288 318,277 315,284 339,295" fill="url(#crimsonHeat)" />
 
-    <!-- Mandible & Chin -->
     <polygon points="222,306 290,306 284,332 228,332" fill="#080C14" />
     <line x1="240" y1="306" x2="240" y2="332" stroke="#25354B" stroke-width="3" />
     <line x1="256" y1="306" x2="256" y2="332" stroke="#25354B" stroke-width="3" />
     <line x1="272" y1="306" x2="272" y2="332" stroke="#25354B" stroke-width="3" />
+
     <polygon points="168,304 222,336 222,364 192,352 168,322" fill="#182230" stroke="#3D506C" stroke-width="2" />
     <polygon points="344,304 290,336 290,364 320,352 344,322" fill="#182230" stroke="#3D506C" stroke-width="2" />
-    <polygon points="222,340 290,340 280,385 256,400 232,385" fill="url(#titaniumGrad)" stroke="#637EA6" stroke-width="2.5" />
 
-    <!-- Highlights -->
+    <polygon points="222,340 290,340 280,385 256,400 232,385" fill="url(#titaniumGrad)" stroke="#637EA6" stroke-width="2.5" />
+    <polygon points="240,350 272,350 266,375 256,384 246,375" fill="#3D506C" stroke="#7A99C5" stroke-width="1.5" />
+
     <path d="M 226,88 L 256,86 L 286,88" stroke="#93AFDB" stroke-width="2.5" stroke-linecap="round" fill="none" />
     <path d="M 130,238 L 168,304" stroke="#7795C2" stroke-width="3" stroke-linecap="round" fill="none" />
     <path d="M 382,238 L 344,304" stroke="#7795C2" stroke-width="3" stroke-linecap="round" fill="none" />
     <path d="M 232,385 L 256,400 L 280,385" stroke="#A2BEEA" stroke-width="3" stroke-linecap="round" fill="none" />
-  </g>
-
-  <!-- Vertical Dividing Tech Line -->
-  <line x1="250" y1="40" x2="250" y2="200" stroke="#1C2E47" stroke-width="2" />
-  <circle cx="250" cy="120" r="4" fill="#00E5FF" filter="url(#cyanGlow)" />
-
-  <!-- Right: Typography -->
-  <g transform="translate(280, 0)">
-    <!-- Category Badge -->
-    <rect x="0" y="44" width="220" height="22" rx="4" fill="#0D1A2D" stroke="#1D3352" stroke-width="1" />
-    <text x="12" y="59" font-family="'Segoe UI', Roboto, 'SF Pro Display', sans-serif" font-size="11" font-weight="700" letter-spacing="3px" fill="#00F0FF">NEURAL AI COMPANION</text>
-
-    <!-- Main Wordmark -->
-    <text x="0" y="125" font-family="'Segoe UI', Roboto, 'SF Pro Display', sans-serif" font-size="64" font-weight="900" letter-spacing="8px" fill="#F0F6FC">
-      ULTRON
-    </text>
-
-    <!-- Subtitle Line -->
-    <text x="2" y="162" font-family="'Segoe UI', Roboto, 'SF Pro Display', sans-serif" font-size="13" font-weight="600" letter-spacing="4px" fill="#7E95B8">
-      AUTONOMOUS PERSONAL AI
-    </text>
-
-    <!-- Tech spec details -->
-    <text x="2" y="190" font-family="'Courier New', monospace" font-size="10" font-weight="400" letter-spacing="2px" fill="#3D567A">
-      SYS.CORE // MODEL: 3.6-FLASH // V1.0.0
-    </text>
   </g>
 </svg>

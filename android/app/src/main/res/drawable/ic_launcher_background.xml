@@ -5,24 +5,31 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Deep Tech Obsidian Background -->
+    <!-- Deep Tech Obsidian Armor Plate Background -->
     <path
         android:pathData="M 0,0 H 108 V 108 H 0 Z"
-        android:fillColor="#070B14" />
+        android:fillColor="#050811" />
 
-    <!-- Subtle Radial Glow Circles -->
+    <!-- Subtle Titanium Angular Panel Seams -->
     <path
-        android:pathData="M 54,8 A 46,46 0 1,1 53.9,8"
-        android:strokeColor="#0B162C"
-        android:strokeWidth="1.0" />
+        android:pathData="M 0,18 L 18,0 M 108,18 L 90,0 M 0,90 L 18,108 M 108,90 L 90,108"
+        android:strokeColor="#0B1322"
+        android:strokeWidth="1.2" />
 
+    <!-- Hexagonal Tech Cyber Contours -->
     <path
-        android:pathData="M 54,16 A 38,38 0 1,1 53.9,16"
-        android:strokeColor="#0E1E38"
+        android:pathData="M 54,16 L 86,34 L 86,74 L 54,92 L 22,74 L 22,34 Z"
+        android:strokeColor="#0E192B"
         android:strokeWidth="0.8" />
 
     <path
-        android:pathData="M 54,24 A 30,30 0 1,1 53.9,24"
-        android:strokeColor="#122748"
+        android:pathData="M 54,26 L 78,40 L 78,68 L 54,82 L 30,68 L 30,40 Z"
+        android:strokeColor="#112036"
         android:strokeWidth="0.6" />
+
+    <!-- Ambient Core Energy Halo Behind Mask -->
+    <path
+        android:pathData="M 54,36 A 18,18 0 1,1 53.9,36"
+        android:strokeColor="#162E4A"
+        android:strokeWidth="1.0" />
 </vector>
