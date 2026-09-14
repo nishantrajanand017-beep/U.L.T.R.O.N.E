@@ -4,7 +4,13 @@ import { listUserDevices } from "@/lib/db/deviceStore";
 
 export async function GET(request: Request) {
   try {
-    const { userId, isNew } = resolveUserSession(request);
+    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    if (!userId || !isAuthenticated) {
+      return NextResponse.json(
+        { error: "Unauthorized: Authentication required." },
+        { status: 401 }
+      );
+    }
     const devices = await listUserDevices(userId);
 
     const response = NextResponse.json({

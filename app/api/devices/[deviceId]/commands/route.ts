@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { getUserIdFromRequest } from "@/lib/auth/session";
+import { resolveUserSession } from "@/lib/auth/session";
 import { listUserDevices, getSupabase } from "@/lib/db/deviceStore";
 import { resolveApprovedApp } from "@/lib/constants/appAllowlist";
 import { findInDeviceCatalog } from "@/lib/db/deviceCatalogStore";
@@ -12,8 +12,8 @@ export async function POST(
 ) {
   try {
     // 1. Authenticate user session
-    const userId = getUserIdFromRequest(request);
-    if (!userId) {
+    const { userId, isAuthenticated } = await resolveUserSession(request);
+    if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Missing or invalid user session." },
         { status: 401 }

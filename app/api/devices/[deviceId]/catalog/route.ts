@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getUserIdFromRequest } from "@/lib/auth/session";
+import { resolveUserSession } from "@/lib/auth/session";
 import { listUserDevices, verifyDeviceToken, getSupabase } from "@/lib/db/deviceStore";
 import {
   getDeviceCatalog,
@@ -39,7 +39,7 @@ export async function GET(
     }
 
     // Authenticate user session or device token
-    const userId = getUserIdFromRequest(request);
+    const { userId } = await resolveUserSession(request);
     let isAuthorized = false;
 
     if (userId) {
@@ -86,7 +86,7 @@ export async function POST(
       return NextResponse.json({ error: "Missing deviceId." }, { status: 400 });
     }
 
-    const userId = getUserIdFromRequest(request);
+    const { userId } = await resolveUserSession(request);
     let targetUserId = userId || "";
     let isAuthorized = false;
 

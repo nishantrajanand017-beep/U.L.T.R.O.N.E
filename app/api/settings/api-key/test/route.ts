@@ -8,7 +8,13 @@ import { validateGeminiApiKey } from "@/lib/geminiService";
 
 export async function POST(request: Request) {
   try {
-    const { userId, isNew } = resolveUserSession(request);
+    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    if (!userId || !isAuthenticated) {
+      return NextResponse.json(
+        { error: "Unauthorized: Authentication required." },
+        { status: 401 }
+      );
+    }
     const body = await request.json().catch(() => ({}));
 
     // If client supplied a candidate key, test that directly

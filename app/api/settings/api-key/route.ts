@@ -8,7 +8,13 @@ import {
 
 export async function GET(request: Request) {
   try {
-    const { userId, isNew } = resolveUserSession(request);
+    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    if (!userId || !isAuthenticated) {
+      return NextResponse.json(
+        { error: "Unauthorized: Authentication required." },
+        { status: 401 }
+      );
+    }
     const info = await getUserApiKeyPublicInfo(userId);
 
     const hasEnvFallback = Boolean(process.env.GEMINI_API_KEY?.trim());
@@ -34,7 +40,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { userId, isNew } = resolveUserSession(request);
+    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    if (!userId || !isAuthenticated) {
+      return NextResponse.json(
+        { error: "Unauthorized: Authentication required." },
+        { status: 401 }
+      );
+    }
     const body = await request.json().catch(() => null);
 
     if (!body || typeof body.apiKey !== "string" || !body.apiKey.trim()) {
@@ -72,7 +84,13 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const { userId, isNew } = resolveUserSession(request);
+    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    if (!userId || !isAuthenticated) {
+      return NextResponse.json(
+        { error: "Unauthorized: Authentication required." },
+        { status: 401 }
+      );
+    }
     const removed = await deleteUserApiKey(userId);
 
     const hasEnvFallback = Boolean(process.env.GEMINI_API_KEY?.trim());

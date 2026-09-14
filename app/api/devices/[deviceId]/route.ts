@@ -7,7 +7,13 @@ export async function DELETE(
   props: { params: Promise<{ deviceId: string }> }
 ) {
   try {
-    const { userId, isNew } = resolveUserSession(request);
+    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    if (!userId || !isAuthenticated) {
+      return NextResponse.json(
+        { error: "Unauthorized: Authentication required." },
+        { status: 401 }
+      );
+    }
     const { deviceId } = await props.params;
 
     if (!deviceId) {

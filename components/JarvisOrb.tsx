@@ -6,6 +6,14 @@ import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
 import ChatPanel from "@/components/ChatPanel";
 import VoiceMode from "@/components/VoiceMode";
 import SettingsModal from "@/components/SettingsModal";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+
+interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+}
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -15,12 +23,17 @@ const MODE_LABEL: Record<TrackerStatus["mode"], string> = {
   zoom: "ZOOM",
 };
 
-export default function JarvisOrb() {
+export default function JarvisOrb({
+  initialUser,
+}: {
+  initialUser?: UserProfile;
+} = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<OrbSceneApi | null>(null);
   const trackerRef = useRef<HandTracker | null>(null);
+  const accountRef = useRef<HTMLDivElement>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
   const [chatOpen, setChatOpen] = useState(false);
@@ -28,6 +41,92 @@ export default function JarvisOrb() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(initialUser || null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+
+  // Listen to Supabase auth state
+  useEffect(() => {
+    if (!isSupabaseConfigured()) {
+      return;
+    }
+
+    try {
+      const supabase = createClient();
+
+      const extractProfile = (rawUser: {
+        id: string;
+        email?: string;
+        user_metadata?: Record<string, unknown>;
+      }): UserProfile => {
+        const metadata = rawUser.user_metadata || {};
+        const name =
+          (typeof metadata.full_name === "string" && metadata.full_name) ||
+          (typeof metadata.name === "string" && metadata.name) ||
+          rawUser.email?.split("@")[0] ||
+          "OPERATOR";
+        const email = rawUser.email || "";
+        const avatarUrl =
+          (typeof metadata.avatar_url === "string" && metadata.avatar_url) ||
+          (typeof metadata.picture === "string" && metadata.picture) ||
+          undefined;
+        return { id: rawUser.id, name, email, avatarUrl };
+      };
+
+      // Initial user check
+      supabase.auth.getUser().then(({ data: { user }, error }) => {
+        if (user && !error) {
+          setUser(extractProfile(user));
+        } else {
+          setUser(null);
+        }
+      });
+
+      // Subscription to auth changes
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          setUser(extractProfile(session.user));
+        } else {
+          setUser(null);
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    } catch (err) {
+      console.warn("[JarvisOrb] Supabase auth check error:", err);
+    }
+  }, []);
+
+  // Close account menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (accountRef.current && !accountRef.current.contains(e.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    };
+    if (accountMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [accountMenuOpen]);
+
+  const handleSignOut = useCallback(async () => {
+    try {
+      if (isSupabaseConfigured()) {
+        const supabase = createClient();
+        await supabase.auth.signOut();
+      }
+    } catch (err) {
+      console.warn("[JarvisOrb] Sign out error:", err);
+    } finally {
+      setUser(null);
+      setAccountMenuOpen(false);
+      window.location.href = "/login";
+    }
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -140,6 +239,104 @@ export default function JarvisOrb() {
       <div className="overlay-scanlines" />
 
       <div className="hud hud-title">U.L.T.R.O.N.</div>
+
+      {/* Top-Right HUD Account Area */}
+      <div ref={accountRef} className="hud-account-container">
+        {user ? (
+          <div className="hud-account-bar">
+            <button
+              type="button"
+              id="hud-account-pill-btn"
+              className="hud-account-pill"
+              onClick={() => setAccountMenuOpen((prev) => !prev)}
+              aria-expanded={accountMenuOpen}
+              aria-label={`Account details for ${user.name}`}
+            >
+              {user.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt=""
+                  className="hud-account-avatar"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="hud-account-avatar-placeholder">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="hud-account-username">{user.name.toUpperCase()}</span>
+              <span className="hud-account-status-dot" title="Authenticated" />
+              <span className={`hud-account-chevron${accountMenuOpen ? " open" : ""}`}>
+                ▼
+              </span>
+            </button>
+
+            <button
+              type="button"
+              id="hud-direct-logout-btn"
+              className="hud-logout-btn"
+              onClick={handleSignOut}
+              title="Sign out of ULTRON"
+              aria-label="Logout of ULTRON"
+            >
+              LOGOUT
+            </button>
+
+            {accountMenuOpen && (
+              <div
+                className="hud-account-popover"
+                role="dialog"
+                aria-label="User account details"
+              >
+                <div className="hud-popover-header">
+                  {user.avatarUrl ? (
+                    <img
+                      src={user.avatarUrl}
+                      alt=""
+                      className="hud-popover-avatar"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="hud-popover-avatar-placeholder">
+                      {user.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="hud-popover-user-info">
+                    <div className="hud-popover-name">{user.name}</div>
+                    <div className="hud-popover-email">{user.email}</div>
+                  </div>
+                </div>
+
+                <div className="hud-popover-divider" />
+
+                <div className="hud-popover-status-row">
+                  <span>AUTH STATUS</span>
+                  <span className="hud-popover-badge">AUTHENTICATED</span>
+                </div>
+
+                <button
+                  type="button"
+                  id="hud-btn-signout"
+                  className="hud-account-signout-btn"
+                  onClick={handleSignOut}
+                  aria-label="Sign out of ULTRON"
+                >
+                  SIGN OUT
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <a
+            href="/login"
+            id="hud-btn-signin"
+            className="hud-signin-btn"
+            aria-label="Sign in to ULTRON"
+          >
+            <span>SIGN IN</span>
+          </a>
+        )}
+      </div>
 
       <div className="hud hud-hint">
         <div>

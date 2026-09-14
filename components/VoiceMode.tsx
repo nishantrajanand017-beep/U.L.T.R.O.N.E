@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { splitTextForTTS } from "@/lib/ttsChunker";
 
 export type VoiceState =
   | "IDLE"
@@ -9,6 +10,31 @@ export type VoiceState =
   | "THINKING"
   | "SPEAKING"
   | "ERROR";
+
+// Module-level runtime concurrency and buffer instrumentation
+let activeTtsRequests = 0;
+let maxConcurrentTtsRequests = 0;
+let bufferedAudioChunks = 0;
+let maxBufferedAudioChunks = 0;
+let lastAudioGapMs = 0;
+
+export function getTtsConcurrencyStats() {
+  return {
+    activeTtsRequests,
+    maxConcurrentTtsRequests,
+    bufferedAudioChunks,
+    maxBufferedAudioChunks,
+    lastAudioGapMs,
+  };
+}
+
+export function resetTtsConcurrencyStats() {
+  activeTtsRequests = 0;
+  maxConcurrentTtsRequests = 0;
+  bufferedAudioChunks = 0;
+  maxBufferedAudioChunks = 0;
+  lastAudioGapMs = 0;
+}
 
 interface VoiceModeProps {
   onClose: () => void;
@@ -29,13 +55,22 @@ const BARGE_IN_VOLUME_THRESHOLD = 0.18; // Strict RMS threshold to interrupt dur
 const BARGE_IN_GRACE_PERIOD_MS = 1000; // Grace period before voice-based barge-in is armed
 const MIN_SPEECH_DURATION_MS = 350; // Minimum speech duration to submit to STT
 
+export const GREETING_TEXT = "Hello Sir, how may I assist you?";
+
 export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: VoiceModeProps) {
   const [state, setState] = useState<VoiceState>("IDLE");
   const [error, setError] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState<number>(0);
-  const [history, setHistory] = useState<ConversationTurn[]>([]);
+  const [history, setHistory] = useState<ConversationTurn[]>([
+    {
+      id: "greeting",
+      role: "model",
+      text: GREETING_TEXT,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    },
+  ]);
   const [latestUserText, setLatestUserText] = useState<string>("");
-  const [latestUltronText, setLatestUltronText] = useState<string>("");
+  const [latestUltronText, setLatestUltronText] = useState<string>(GREETING_TEXT);
 
   const stateRef = useRef<VoiceState>("IDLE");
   stateRef.current = state;
@@ -49,7 +84,6 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
     [onStateChange]
   );
 
-
   const historyRef = useRef<ConversationTurn[]>([]);
   historyRef.current = history;
 
@@ -62,7 +96,26 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
   // Controlled single HTMLAudioElement & Session Tracking
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const activeAudioUrlRef = useRef<string | null>(null);
+  const bufferedAudioBlobRef = useRef<Blob | null>(null);
+  const bufferedAudioUrlRef = useRef<string | null>(null);
+  const activeTtsAbortControllerRef = useRef<AbortController | null>(null);
   const currentTurnIdRef = useRef<number>(0);
+  const hasGreetedRef = useRef<boolean>(false);
+  const lastSpeechEndTimeRef = useRef<number>(0);
+
+  // Diagnostic latency measurement refs
+  const t0_ref = useRef<number>(0);
+  const t1_ref = useRef<number>(0);
+  const t2_ref = useRef<number>(0);
+  const t3_ref = useRef<number>(0);
+  const t4_ref = useRef<number>(0);
+  const t_speaking_ref = useRef<number>(0);
+  const t5_ref = useRef<number>(0);
+  const t6_ref = useRef<number>(0);
+  const t7_ref = useRef<number>(0);
+  const t8_ref = useRef<number>(0);
+  const hasRecordedFirstAudioPlayRef = useRef<boolean>(false);
+  const hasRecordedFirstAudibleRef = useRef<boolean>(false);
 
   const isSpeakingRef = useRef<boolean>(false);
   const speechStartTimeRef = useRef<number>(0);
@@ -72,9 +125,48 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
   const animationFrameRef = useRef<number | null>(null);
   const isMountedRef = useRef<boolean>(true);
 
-  // Stop active TTS audio cleanly
+  // Transcript container & auto-scroll references
+  const transcriptContainerRef = useRef<HTMLDivElement | null>(null);
+  const transcriptBottomRef = useRef<HTMLDivElement | null>(null);
+  const isNearBottomRef = useRef<boolean>(true);
+
+  const handleScroll = useCallback(() => {
+    const el = transcriptContainerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottomRef.current = distanceToBottom < 60;
+  }, []);
+
+  const scrollToBottom = useCallback((force: boolean = false) => {
+    if (force || isNearBottomRef.current) {
+      transcriptBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, []);
+
+  useEffect(() => {
+    const lastTurn = history[history.length - 1];
+    const isNewUserTurn = lastTurn?.role === "user";
+    scrollToBottom(isNewUserTurn || state === "THINKING");
+  }, [history, state, scrollToBottom]);
+
+  useEffect(() => {
+    scrollToBottom(true);
+  }, [scrollToBottom]);
+
+  // Stop active TTS audio cleanly and abort any in-flight synthesis fetch
   const stopTTSAudio = useCallback((reason: string = "manual") => {
     console.log(`[ULTRON TTS] stopTTSAudio called (reason: ${reason})`);
+
+    // Abort active in-flight TTS fetch immediately if running
+    if (activeTtsAbortControllerRef.current) {
+      try {
+        activeTtsAbortControllerRef.current.abort();
+      } catch {
+        // ignore
+      }
+      activeTtsAbortControllerRef.current = null;
+    }
+
     const audio = audioElementRef.current;
     if (audio) {
       try {
@@ -93,6 +185,18 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
       }
       activeAudioUrlRef.current = null;
     }
+
+    // Clear single-item prefetch buffer
+    if (bufferedAudioUrlRef.current) {
+      try {
+        URL.revokeObjectURL(bufferedAudioUrlRef.current);
+      } catch (e) {
+        console.warn("[ULTRON TTS] Error revoking buffered audio object URL:", e);
+      }
+      bufferedAudioUrlRef.current = null;
+    }
+    bufferedAudioBlobRef.current = null;
+    bufferedAudioChunks = 0;
   }, []);
 
   // Complete cleanup function on component unmount
@@ -142,7 +246,7 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
   }, [stopTTSAudio]);
 
   // Forward declarations for conversation pipeline
-  const processTurnPipeline = useRef<((audioBlob: Blob) => Promise<void>) | null>(null);
+  const processTurnPipeline = useRef<((audioBlob: Blob, explicitT0?: number) => Promise<void>) | null>(null);
 
   // Start continuous recording session (LISTENING)
   const startRecordingSession = useCallback(() => {
@@ -188,8 +292,11 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
           `[VoiceMode] Recorded audio captured: size=${totalBlob.size} bytes, type=${totalBlob.type}`
         );
 
+        const speechEndTimestamp = lastSpeechEndTimeRef.current || performance.now();
+        lastSpeechEndTimeRef.current = 0;
+
         if (totalBlob.size >= 1200 && processTurnPipeline.current) {
-          processTurnPipeline.current(totalBlob);
+          processTurnPipeline.current(totalBlob, speechEndTimestamp);
         } else {
           // Audio too small or empty -> automatically resume listening
           if (
@@ -214,46 +321,25 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
     }
   }, [updateVoiceState]);
 
-  // Robust Conversation Pipeline: STT -> Gemini -> TTS -> Playback -> Next Turn
-  processTurnPipeline.current = async (audioBlob: Blob) => {
+  // Reusable Text -> Qwen -> Chunks -> Sequential Kokoro TTS Pipeline
+  const processTextTurn = useCallback(async (userTranscript: string, diagTimestamps?: { t0?: number; t1?: number; t2?: number }) => {
     if (!isMountedRef.current) return;
 
     const turnId = ++currentTurnIdRef.current;
-    console.log(`[ULTRON TTS] Starting pipeline turn #${turnId}`);
+    console.log(`[ULTRON TTS] Starting pipeline turn #${turnId} for transcript: "${userTranscript}"`);
+    stopTTSAudio("new-turn-start");
+
+    const t0 = diagTimestamps?.t0 ?? performance.now();
+    const t1 = diagTimestamps?.t1 ?? t0;
+    const t2 = diagTimestamps?.t2 ?? t0;
+    t0_ref.current = t0;
+    t1_ref.current = t1;
+    t2_ref.current = t2;
+    hasRecordedFirstAudioPlayRef.current = false;
+    hasRecordedFirstAudibleRef.current = false;
 
     try {
-      // 1. STT Phase (LISTENING -> STT)
       setError(null);
-
-      const ext = audioBlob.type.includes("mp4") ? "mp4" : "webm";
-      const audioFile = new File([audioBlob], `speech.${ext}`, {
-        type: audioBlob.type || "audio/webm",
-      });
-
-      const formData = new FormData();
-      formData.append("file", audioFile);
-
-      const sttRes = await fetch("/api/voice/stt", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!sttRes.ok) {
-        const sttErr = await sttRes.json().catch(() => ({}));
-        throw new Error(sttErr.error || `STT HTTP error ${sttRes.status}`);
-      }
-
-      const sttData = await sttRes.json();
-      const userTranscript = (sttData.text || "").trim();
-
-      if (!userTranscript) {
-        console.log(`[VoiceMode] [Turn #${turnId}] Empty transcript, returning to LISTENING.`);
-        updateVoiceState("LISTENING");
-        startRecordingSession();
-        return;
-      }
-
-      console.log(`[VoiceMode] [Turn #${turnId}] User transcript: "${userTranscript}"`);
       setLatestUserText(userTranscript);
 
       const userTurn: ConversationTurn = {
@@ -266,8 +352,12 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
       const updatedHistory = [...historyRef.current, userTurn];
       setHistory(updatedHistory);
 
-      // 2. Gemini Thinking Phase (THINKING)
+      // 2. Qwen Thinking Phase (THINKING)
       updateVoiceState("THINKING");
+
+      const t3 = performance.now();
+      t3_ref.current = t3;
+      console.log(`[LATENCY] T3 (/api/chat fetch start): ${t3.toFixed(2)}ms (delta T3-T2: ${(t3 - t2).toFixed(2)}ms)`);
 
       const chatRes = await fetch("/api/chat", {
         method: "POST",
@@ -275,22 +365,27 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
         body: JSON.stringify({
           message: userTranscript,
           history: updatedHistory.map((h) => ({ role: h.role, text: h.text })),
+          voiceMode: true,
         }),
       });
 
+      const t4 = performance.now();
+      t4_ref.current = t4;
+      console.log(`[LATENCY] T4 (Qwen response received): ${t4.toFixed(2)}ms (Qwen net: ${(t4 - t3).toFixed(2)}ms, elapsed T4-T0: ${(t4 - t0).toFixed(2)}ms)`);
+
       if (!chatRes.ok) {
         const chatErr = await chatRes.json().catch(() => ({}));
-        throw new Error(chatErr.error || `Gemini error (${chatRes.status})`);
+        throw new Error(chatErr.error || `AI Core error (${chatRes.status})`);
       }
 
       const chatData = await chatRes.json();
       const ultronReply = (chatData.text || chatData.reply || "").trim();
 
       if (!ultronReply) {
-        throw new Error("No response generated by Gemini.");
+        throw new Error("No response generated by ULTRON AI Core.");
       }
 
-      console.log(`[VoiceMode] [Turn #${turnId}] Gemini reply: "${ultronReply}"`);
+      console.log(`[VoiceMode] [Turn #${turnId}] ULTRON reply: "${ultronReply}"`);
       setLatestUltronText(ultronReply);
 
       const ultronTurn: ConversationTurn = {
@@ -308,100 +403,315 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
         return;
       }
 
-      // 3. ElevenLabs TTS Request Phase (SPEAKING)
+      // 3. TTS Request & One-Chunk-Ahead Prefetching / Sequential Playback Phase
+      const chunks = splitTextForTTS(ultronReply);
+      console.log(
+        `[ULTRON TTS] [Turn #${turnId}] Split response (${ultronReply.length} chars) into ${chunks.length} chunks`
+      );
+
+      if (chunks.length === 0) {
+        if (turnId === currentTurnIdRef.current && isMountedRef.current) {
+          updateVoiceState("LISTENING");
+          startRecordingSession();
+        }
+        return;
+      }
+
+      const t_speaking = performance.now();
+      t_speaking_ref.current = t_speaking;
+      console.log(`[LATENCY] State change to SPEAKING at ${t_speaking.toFixed(2)}ms (delta from T4: ${(t_speaking - t4).toFixed(2)}ms, BEFORE audio ready: true)`);
       updateVoiceState("SPEAKING");
       speakingStartTimeRef.current = Date.now();
       interruptionCounterRef.current = 0;
 
-      console.log(`[ULTRON TTS] [Turn #${turnId}] Requesting ElevenLabs TTS: textLength=${ultronReply.length}`);
+      let turnMaxConcurrent = 0;
+      let turnMaxBuffered = 0;
 
-      const ttsRes = await fetch("/api/voice/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: ultronReply }),
-      });
+      // Helper function to synthesize a single chunk with strict concurrency tracking
+      const fetchChunkTTS = async (
+        chunkText: string,
+        chunkIndex: number,
+        totalChunks: number
+      ): Promise<Blob | null> => {
+        if (turnId !== currentTurnIdRef.current || !isMountedRef.current) return null;
 
-      const contentType = ttsRes.headers.get("content-type");
-      console.log(`[ULTRON TTS] [Turn #${turnId}] Response status: ${ttsRes.status}, content-type: ${contentType}`);
+        if (chunkIndex === 0) {
+          const t5 = performance.now();
+          t5_ref.current = t5;
+          console.log(
+            `[LATENCY] T5 (first /api/voice/tts request starts): ${t5.toFixed(2)}ms (delta T5-T4: ${(t5 - (t4_ref.current || 0)).toFixed(2)}ms)`
+          );
+        }
 
-      if (!ttsRes.ok) {
-        const ttsErr = await ttsRes.json().catch(() => ({}));
-        throw new Error(ttsErr.error || `ElevenLabs TTS error (${ttsRes.status})`);
-      }
+        const t0_chunk = Date.now();
+        const chunkAbortController = new AbortController();
+        activeTtsAbortControllerRef.current = chunkAbortController;
 
-      const audioBlobResult = await ttsRes.blob();
-      console.log(`[ULTRON TTS] [Turn #${turnId}] Audio blob size: ${audioBlobResult.size} bytes, type: ${audioBlobResult.type}`);
+        activeTtsRequests++;
+        maxConcurrentTtsRequests = Math.max(maxConcurrentTtsRequests, activeTtsRequests);
+        turnMaxConcurrent = Math.max(turnMaxConcurrent, activeTtsRequests);
 
-      if (audioBlobResult.size === 0) {
-        throw new Error("ElevenLabs TTS returned 0 bytes of audio.");
-      }
+        console.log(
+          `[TTS] START turn=${turnId} chunk=${chunkIndex + 1}/${totalChunks} chars=${chunkText.length} active=${activeTtsRequests}`
+        );
 
-      // Check if turn was superseded during fetch
-      if (turnId !== currentTurnIdRef.current || !isMountedRef.current) {
-        console.log(`[ULTRON TTS] [Turn #${turnId}] Superseded after TTS fetch, aborting playback.`);
+        let ttsRes: Response;
+        try {
+          ttsRes = await fetch("/api/voice/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunkText }),
+            signal: chunkAbortController.signal,
+          });
+        } catch (fetchErr: unknown) {
+          activeTtsRequests--;
+          const chunkLatency = Date.now() - t0_chunk;
+          const isAbort = (fetchErr as Error)?.name === "AbortError";
+          console.log(
+            `[TTS] END turn=${turnId} chunk=${chunkIndex + 1}/${totalChunks} chars=${chunkText.length} latency=${chunkLatency}ms active=${activeTtsRequests}${isAbort ? " (ABORTED)" : ""}`
+          );
+          activeTtsAbortControllerRef.current = null;
+
+          if (isAbort || turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+            console.log(`[ULTRON TTS] [Turn #${turnId}] Chunk ${chunkIndex + 1} fetch aborted or superseded.`);
+            return null;
+          }
+          throw fetchErr;
+        }
+
+        const chunkLatency = Date.now() - t0_chunk;
+        activeTtsRequests--;
+        activeTtsAbortControllerRef.current = null;
+
+        console.log(
+          `[TTS] END turn=${turnId} chunk=${chunkIndex + 1}/${totalChunks} chars=${chunkText.length} latency=${chunkLatency}ms active=${activeTtsRequests}`
+        );
+
+        if (!ttsRes.ok) {
+          const ttsErr = await ttsRes.json().catch(() => ({}));
+          const errMsg = ttsErr.error || `TTS service error (${ttsRes.status})`;
+
+          if (errMsg.includes("timed out") || ttsRes.status === 504) {
+            console.error(
+              `[TTS] TIMEOUT turn=${turnId} chunk=${chunkIndex + 1}/${totalChunks} chars=${chunkText.length} elapsed=${chunkLatency}ms maxConcurrent=${turnMaxConcurrent}`
+            );
+            throw new Error("TTS service timed out.");
+          }
+          throw new Error(errMsg);
+        }
+
+        const audioBlobResult = await ttsRes.blob();
+        console.log(
+          `[ULTRON TTS] [Turn #${turnId}] Chunk ${chunkIndex + 1}/${totalChunks} audio blob size: ${audioBlobResult.size} bytes`
+        );
+
+        if (chunkIndex === 0) {
+          const t6 = performance.now();
+          t6_ref.current = t6;
+          console.log(
+            `[LATENCY] T6 (first TTS response received): ${t6.toFixed(2)}ms (first TTS net: ${(t6 - (t5_ref.current || 0)).toFixed(2)}ms, elapsed T6-T0: ${(t6 - (t0_ref.current || 0)).toFixed(2)}ms)`
+          );
+        }
+
+        if (audioBlobResult.size === 0) {
+          return null;
+        }
+
+        if (turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+          return null;
+        }
+
+        return audioBlobResult;
+      };
+
+      // Play audio chunk helper with gap timing measurement
+      let previousAudioEndedAt: number | null = null;
+
+      const playAudioChunk = async (
+        audioBlob: Blob,
+        chunkIndex: number
+      ): Promise<void> => {
+        if (turnId !== currentTurnIdRef.current || !isMountedRef.current) return;
+
+        const nextAudioStartedAt = performance.now();
+        if (chunkIndex === 0 && !hasRecordedFirstAudioPlayRef.current) {
+          hasRecordedFirstAudioPlayRef.current = true;
+          const t7 = nextAudioStartedAt;
+          t7_ref.current = t7;
+          console.log(
+            `[LATENCY] T7 (browser audio.play called): ${t7.toFixed(2)}ms (delta T7-T6: ${(t7 - (t6_ref.current || 0)).toFixed(2)}ms, elapsed T7-T0: ${(t7 - (t0_ref.current || 0)).toFixed(2)}ms)`
+          );
+        }
+
+        if (previousAudioEndedAt !== null) {
+          const gapMs = Math.max(0, nextAudioStartedAt - previousAudioEndedAt);
+          lastAudioGapMs = gapMs;
+          console.log(
+            `[TTS] GAP turn=${turnId} from=${chunkIndex} to=${chunkIndex + 1} gapMs=${Math.round(gapMs)}`
+          );
+        }
+
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        if (activeAudioUrlRef.current) {
+          try {
+            URL.revokeObjectURL(activeAudioUrlRef.current);
+          } catch {
+            // ignore
+          }
+          activeAudioUrlRef.current = null;
+        }
+        activeAudioUrlRef.current = audioUrl;
+
+        await new Promise<void>((resolve) => {
+          const audio = audioElementRef.current;
+          if (!audio || turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+            resolve();
+            return;
+          }
+
+          audio.src = audioUrl;
+
+          const onEndedOrError = () => {
+            audio.removeEventListener("ended", onEndedOrError);
+            audio.removeEventListener("error", onEndedOrError);
+            audio.removeEventListener("playing", onPlaying);
+            previousAudioEndedAt = performance.now();
+            resolve();
+          };
+
+          const onPlaying = () => {
+            if (chunkIndex === 0 && !hasRecordedFirstAudibleRef.current) {
+              hasRecordedFirstAudibleRef.current = true;
+              const t8 = performance.now();
+              t8_ref.current = t8;
+              console.log(
+                `[LATENCY] T8 (first audible sound / playing event): ${t8.toFixed(2)}ms (startup delay T8-T7: ${(t8 - (t7_ref.current || 0)).toFixed(2)}ms, elapsed T8-T0: ${(t8 - (t0_ref.current || 0)).toFixed(2)}ms)`
+              );
+
+              const t0 = t0_ref.current;
+              const t1 = t1_ref.current;
+              const t2 = t2_ref.current;
+              const t3 = t3_ref.current;
+              const t4 = t4_ref.current;
+              const t5 = t5_ref.current;
+              const t6 = t6_ref.current;
+              const t7 = t7_ref.current;
+              const t_spk = t_speaking_ref.current;
+
+              const latencySummary = {
+                t0,
+                t1,
+                t2,
+                t3,
+                t4,
+                t5,
+                t6,
+                t7,
+                t8,
+                t_speaking: t_spk,
+                whisper_latency: t2 - t0,
+                whisper_net: t2 - t1,
+                dispatch_to_stt: t1 - t0,
+                qwen_latency: t4 - t2,
+                qwen_net: t4 - t3,
+                first_tts_latency: t6 - t4,
+                first_tts_net: t6 - t5,
+                browser_audio_startup: t7 - t6,
+                audible_startup: t8 - t7,
+                total_to_first_audio: t7 - t0,
+                total_to_audible: t8 - t0,
+                speaking_set_before_audio: t_spk < t7,
+                speaking_to_audio_wait: t7 - t_spk,
+                chunks_count: chunks.length,
+                ultron_reply_length: ultronReply.length,
+                ultron_reply: ultronReply,
+              };
+
+              (window as unknown as { __ultronLatestLatency?: typeof latencySummary }).__ultronLatestLatency = latencySummary;
+              console.log("[LATENCY SUMMARY]", JSON.stringify(latencySummary, null, 2));
+            }
+          };
+
+          audio.addEventListener("ended", onEndedOrError);
+          audio.addEventListener("error", onEndedOrError);
+          audio.addEventListener("playing", onPlaying);
+
+          audio.play().catch((playErr) => {
+            console.warn(`[ULTRON TTS] Audio element playback note for chunk ${chunkIndex + 1}:`, playErr);
+            onEndedOrError();
+          });
+        });
+      };
+
+      // 1. Synthesize chunk 1 first
+      const firstBlob = await fetchChunkTTS(chunks[0], 0, chunks.length);
+      if (!firstBlob || turnId !== currentTurnIdRef.current || !isMountedRef.current) {
         return;
       }
 
-      // 4. Browser Audio Element Setup & Playback
-      stopTTSAudio("new-turn-starting");
+      let currentBlob: Blob = firstBlob;
 
-      const audioUrl = URL.createObjectURL(audioBlobResult);
-      activeAudioUrlRef.current = audioUrl;
-      console.log(`[ULTRON TTS] [Turn #${turnId}] Created Object URL: ${audioUrl}`);
+      // 2. Playback and one-chunk-ahead producer/consumer loop
+      for (let i = 0; i < chunks.length; i++) {
+        if (turnId !== currentTurnIdRef.current || !isMountedRef.current) return;
 
-      let audio = audioElementRef.current;
-      if (!audio) {
-        audio = new Audio();
-        audioElementRef.current = audio;
+        // Start playback of chunk i immediately
+        const playPromise = playAudioChunk(currentBlob, i);
+
+        // While chunk i is playing, start synthesizing chunk i + 1 (if available)
+        let prefetchPromise: Promise<Blob | null> | null = null;
+        if (i + 1 < chunks.length) {
+          prefetchPromise = fetchChunkTTS(chunks[i + 1], i + 1, chunks.length).then((blob) => {
+            if (blob && turnId === currentTurnIdRef.current && isMountedRef.current) {
+              bufferedAudioBlobRef.current = blob;
+              bufferedAudioChunks = 1;
+              maxBufferedAudioChunks = Math.max(maxBufferedAudioChunks, 1);
+              turnMaxBuffered = Math.max(turnMaxBuffered, 1);
+            }
+            return blob;
+          });
+        }
+
+        // Wait for current chunk i playback to complete
+        await playPromise;
+
+        // Verify turn is still current after playback finishes
+        if (turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+          console.log(
+            `[ULTRON TTS] [Turn #${turnId}] Turn superseded/interrupted after chunk ${i + 1}/${chunks.length}. Halting.`
+          );
+          return;
+        }
+
+        // Consume buffered chunk i + 1 for next iteration
+        if (prefetchPromise) {
+          const nextBlob = await prefetchPromise;
+
+          bufferedAudioBlobRef.current = null;
+          bufferedAudioChunks = 0;
+
+          if (!nextBlob || turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+            console.log(
+              `[ULTRON TTS] [Turn #${turnId}] Prefetched chunk ${i + 2} missing or superseded. Halting.`
+            );
+            return;
+          }
+
+          currentBlob = nextBlob;
+        }
       }
 
-      audio.src = audioUrl;
-      audio.preload = "auto";
-      audio.volume = 1.0;
-      audio.muted = false;
+      console.log(
+        `[TTS] TURN COMPLETE turn=${turnId} maxConcurrent=${turnMaxConcurrent} maxBuffered=${turnMaxBuffered}`
+      );
 
-      // Handle natural playback completion
-      audio.onended = () => {
-        if (!isMountedRef.current || turnId !== currentTurnIdRef.current) return;
-        console.log(`[ULTRON TTS] [Turn #${turnId}] Audio ended naturally. Returning to LISTENING.`);
-        stopTTSAudio("audio-onended");
-
+      // All chunks finished naturally
+      if (turnId === currentTurnIdRef.current && isMountedRef.current) {
+        console.log(`[ULTRON TTS] [Turn #${turnId}] All ${chunks.length} chunks played. Returning to LISTENING.`);
+        stopTTSAudio("all-chunks-ended");
         updateVoiceState("LISTENING");
         startRecordingSession();
-      };
-
-      // Handle audio errors
-      audio.onerror = (e) => {
-        console.error(`[ULTRON TTS] [Turn #${turnId}] Audio element onerror event:`, e);
-        if (!isMountedRef.current || turnId !== currentTurnIdRef.current) return;
-        stopTTSAudio("audio-onerror");
-
-        updateVoiceState("LISTENING");
-        startRecordingSession();
-      };
-
-      console.log(`[ULTRON TTS] [Turn #${turnId}] Invoking audio.play()... (volume=${audio.volume}, muted=${audio.muted})`);
-
-      try {
-        await audio.play();
-        console.log(
-          `[ULTRON TTS] [Turn #${turnId}] audio.play() RESOLVED successfully! (duration=${audio.duration}s, paused=${audio.paused})`
-        );
-      } catch (playErr) {
-        const errName = (playErr as Error)?.name;
-        console.warn(`[ULTRON TTS] [Turn #${turnId}] audio.play() rejected (${errName}):`, playErr);
-
-        if (errName === "NotAllowedError") {
-          setError("AUTOPLAY BLOCKED BY BROWSER: CLICK TO UNMUTE AUDIO");
-        } else if (errName !== "AbortError") {
-          setError(`AUDIO PLAYBACK ERROR: ${(playErr as Error)?.message || "Playback failed"}`);
-        }
-
-        stopTTSAudio("play-rejected");
-        if (isMountedRef.current && turnId === currentTurnIdRef.current) {
-          updateVoiceState("LISTENING");
-          startRecordingSession();
-        }
       }
     } catch (err: unknown) {
       console.error(`[ULTRON TTS] [Turn #${turnId}] Pipeline error:`, err);
@@ -415,6 +725,193 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
       // Return to listening after displaying error cleanly
       setTimeout(() => {
         if (isMountedRef.current && turnId === currentTurnIdRef.current) {
+          setError(null);
+          updateVoiceState("LISTENING");
+          startRecordingSession();
+        }
+      }, 3500);
+    }
+  }, [onAudioLevel, startRecordingSession, stopTTSAudio, updateVoiceState]);
+
+  // Fixed local greeting synthesized via Kokoro (voice=am_adam, speed=1.0)
+  const playGreeting = useCallback(async () => {
+    if (!isMountedRef.current || hasGreetedRef.current) return;
+    hasGreetedRef.current = true;
+
+    const turnId = ++currentTurnIdRef.current;
+    console.log(`[ULTRON TTS] Starting greeting turn #${turnId}: "${GREETING_TEXT}"`);
+
+    try {
+      updateVoiceState("SPEAKING");
+      speakingStartTimeRef.current = Date.now();
+      interruptionCounterRef.current = 0;
+
+      const chunkAbortController = new AbortController();
+      activeTtsAbortControllerRef.current = chunkAbortController;
+
+      activeTtsRequests++;
+      maxConcurrentTtsRequests = Math.max(maxConcurrentTtsRequests, activeTtsRequests);
+
+      console.log(
+        `[TTS] START turn=${turnId} chunk=1/1 chars=${GREETING_TEXT.length} active=${activeTtsRequests}`
+      );
+
+      const t0 = Date.now();
+      let ttsRes: Response;
+      try {
+        ttsRes = await fetch("/api/voice/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: GREETING_TEXT,
+            voice: "am_adam",
+            speed: 1.0,
+          }),
+          signal: chunkAbortController.signal,
+        });
+      } catch (fetchErr: unknown) {
+        activeTtsRequests--;
+        const latency = Date.now() - t0;
+        const isAbort = (fetchErr as Error)?.name === "AbortError";
+        console.log(
+          `[TTS] END turn=${turnId} chunk=1/1 chars=${GREETING_TEXT.length} latency=${latency}ms active=${activeTtsRequests}${isAbort ? " (ABORTED)" : ""}`
+        );
+        activeTtsAbortControllerRef.current = null;
+
+        if (isAbort || turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+          console.log(`[ULTRON TTS] Greeting turn #${turnId} fetch aborted or superseded.`);
+          return;
+        }
+        throw fetchErr;
+      }
+
+      const latency = Date.now() - t0;
+      activeTtsRequests--;
+      activeTtsAbortControllerRef.current = null;
+
+      console.log(
+        `[TTS] END turn=${turnId} chunk=1/1 chars=${GREETING_TEXT.length} latency=${latency}ms active=${activeTtsRequests}`
+      );
+
+      if (!ttsRes.ok) {
+        const ttsErr = await ttsRes.json().catch(() => ({}));
+        throw new Error(ttsErr.error || `TTS service error (${ttsRes.status})`);
+      }
+
+      const audioBlobResult = await ttsRes.blob();
+      if (audioBlobResult.size === 0 || turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+        return;
+      }
+
+      const audioUrl = URL.createObjectURL(audioBlobResult);
+      if (activeAudioUrlRef.current) {
+        try {
+          URL.revokeObjectURL(activeAudioUrlRef.current);
+        } catch {
+          // ignore
+        }
+        activeAudioUrlRef.current = null;
+      }
+      activeAudioUrlRef.current = audioUrl;
+
+      await new Promise<void>((resolve) => {
+        const audio = audioElementRef.current;
+        if (!audio || turnId !== currentTurnIdRef.current || !isMountedRef.current) {
+          resolve();
+          return;
+        }
+
+        audio.src = audioUrl;
+
+        const onEndedOrError = () => {
+          audio.removeEventListener("ended", onEndedOrError);
+          audio.removeEventListener("error", onEndedOrError);
+          resolve();
+        };
+
+        audio.addEventListener("ended", onEndedOrError);
+        audio.addEventListener("error", onEndedOrError);
+
+        audio.play().catch((playErr) => {
+          console.warn("[ULTRON TTS] Greeting audio playback note:", playErr);
+          onEndedOrError();
+        });
+      });
+
+      console.log(
+        `[TTS] TURN COMPLETE turn=${turnId} maxConcurrent=1 maxBuffered=0`
+      );
+
+      if (turnId === currentTurnIdRef.current && isMountedRef.current) {
+        console.log("[ULTRON TTS] Greeting completed naturally. Transitioning to LISTENING.");
+        stopTTSAudio("greeting-ended");
+        updateVoiceState("LISTENING");
+        startRecordingSession();
+      }
+    } catch (err: unknown) {
+      console.error("[ULTRON TTS] Greeting error:", err);
+      if (turnId === currentTurnIdRef.current && isMountedRef.current) {
+        stopTTSAudio("greeting-error");
+        updateVoiceState("LISTENING");
+        startRecordingSession();
+      }
+    }
+  }, [startRecordingSession, stopTTSAudio, updateVoiceState]);
+
+  // Robust Conversation Pipeline: STT -> processTextTurn
+  processTurnPipeline.current = async (audioBlob: Blob, explicitT0?: number) => {
+    if (!isMountedRef.current) return;
+
+    try {
+      setError(null);
+      const t0 = explicitT0 ?? performance.now();
+      const t1 = performance.now();
+      console.log(`[LATENCY] T0 (speech ended / record stop): ${t0.toFixed(2)}ms`);
+      console.log(`[LATENCY] T1 (Whisper STT request start): ${t1.toFixed(2)}ms (recording-to-STT lag T1-T0: ${(t1 - t0).toFixed(2)}ms)`);
+
+      const ext = audioBlob.type.includes("mp4") ? "mp4" : audioBlob.type.includes("wav") ? "wav" : "webm";
+      const audioFile = new File([audioBlob], `speech.${ext}`, {
+        type: audioBlob.type || "audio/webm",
+      });
+
+      const formData = new FormData();
+      formData.append("file", audioFile);
+
+      const sttRes = await fetch("/api/voice/stt", {
+        method: "POST",
+        body: formData,
+      });
+
+      const t2 = performance.now();
+      console.log(`[LATENCY] T2 (Whisper STT response received): ${t2.toFixed(2)}ms (Whisper net: ${(t2 - t1).toFixed(2)}ms, elapsed T2-T0: ${(t2 - t0).toFixed(2)}ms)`);
+
+      if (!sttRes.ok) {
+        const sttErr = await sttRes.json().catch(() => ({}));
+        throw new Error(sttErr.error || `STT HTTP error ${sttRes.status}`);
+      }
+
+      const sttData = await sttRes.json();
+      const userTranscript = (sttData.text || "").trim();
+
+      if (!userTranscript) {
+        console.log(`[VoiceMode] Empty transcript, returning to LISTENING.`);
+        updateVoiceState("LISTENING");
+        startRecordingSession();
+        return;
+      }
+
+      await processTextTurn(userTranscript, { t0, t1, t2 });
+    } catch (err: unknown) {
+      console.error("[VoiceMode] Pipeline error:", err);
+      const msg = err instanceof Error ? err.message : "Voice transaction failed.";
+      setError(msg);
+      updateVoiceState("ERROR");
+      onAudioLevel?.(0);
+
+      stopTTSAudio("pipeline-error");
+
+      setTimeout(() => {
+        if (isMountedRef.current) {
           setError(null);
           updateVoiceState("LISTENING");
           startRecordingSession();
@@ -514,6 +1011,7 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
               `[VoiceMode] End of speech detected. Duration: ${speechDuration}ms, Silence: ${silenceDuration}ms`
             );
             isSpeakingRef.current = false;
+            lastSpeechEndTimeRef.current = performance.now() - silenceDuration;
             if (
               mediaRecorderRef.current &&
               mediaRecorderRef.current.state === "recording"
@@ -582,9 +1080,15 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
           audioElementRef.current.muted = false;
         }
 
-        updateVoiceState("LISTENING");
-        startRecordingSession();
         runVADLoop();
+
+        // Trigger greeting once on mount, then automatically enter LISTENING
+        if (!hasGreetedRef.current) {
+          void playGreeting();
+        } else {
+          updateVoiceState("LISTENING");
+          startRecordingSession();
+        }
       } catch (err: unknown) {
         console.error("Microphone initialization error:", err);
         const isDenied =
@@ -602,11 +1106,12 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
 
     return () => {
       isMountedRef.current = false;
+      hasGreetedRef.current = false;
       cleanupAllResources();
       onStateChange?.("IDLE");
       onAudioLevel?.(0);
     };
-  }, [cleanupAllResources, onAudioLevel, onStateChange, runVADLoop, startRecordingSession, updateVoiceState]);
+  }, [cleanupAllResources, onAudioLevel, onStateChange, playGreeting, runVADLoop, startRecordingSession, updateVoiceState]);
 
   // Handle manual interrupt button
   const handleManualInterrupt = () => {
@@ -619,6 +1124,42 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
     }
   };
 
+  // Expose test automation hooks on window during development / automated testing
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as unknown as { __ultronVoiceTurn?: (text: string) => Promise<void> }).__ultronVoiceTurn = processTextTurn;
+      (window as unknown as { __ultronPlayGreeting?: () => Promise<void> }).__ultronPlayGreeting = playGreeting;
+      (window as unknown as { __ultronSubmitAudioBlob?: (blob: Blob, t0?: number) => Promise<void> }).__ultronSubmitAudioBlob = (blob: Blob, t0?: number) => {
+        if (processTurnPipeline.current) {
+          return processTurnPipeline.current(blob, t0 ?? performance.now());
+        }
+        return Promise.resolve();
+      };
+      (window as unknown as { __ultronGetLatestLatency?: () => unknown }).__ultronGetLatestLatency = () =>
+        (window as unknown as { __ultronLatestLatency?: unknown }).__ultronLatestLatency;
+      (window as unknown as { __ultronInterrupt?: () => void }).__ultronInterrupt = () => {
+        console.log("[ULTRON TTS] Programmatic interrupt invoked");
+        currentTurnIdRef.current++;
+        stopTTSAudio("programmatic-interrupt");
+        updateVoiceState("LISTENING");
+        startRecordingSession();
+      };
+      (window as unknown as { __ultronGetTtsStats?: () => { activeTtsRequests: number; maxConcurrentTtsRequests: number } }).__ultronGetTtsStats = getTtsConcurrencyStats;
+      (window as unknown as { __ultronResetTtsStats?: () => void }).__ultronResetTtsStats = resetTtsConcurrencyStats;
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        delete (window as unknown as { __ultronVoiceTurn?: unknown }).__ultronVoiceTurn;
+        delete (window as unknown as { __ultronPlayGreeting?: unknown }).__ultronPlayGreeting;
+        delete (window as unknown as { __ultronSubmitAudioBlob?: unknown }).__ultronSubmitAudioBlob;
+        delete (window as unknown as { __ultronGetLatestLatency?: unknown }).__ultronGetLatestLatency;
+        delete (window as unknown as { __ultronInterrupt?: unknown }).__ultronInterrupt;
+        delete (window as unknown as { __ultronGetTtsStats?: unknown }).__ultronGetTtsStats;
+        delete (window as unknown as { __ultronResetTtsStats?: unknown }).__ultronResetTtsStats;
+      }
+    };
+  }, [playGreeting, processTextTurn, startRecordingSession, stopTTSAudio, updateVoiceState]);
+
   // State badge styling and label
   const getStateMeta = () => {
     switch (state) {
@@ -627,7 +1168,7 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
       case "PROCESSING":
         return { label: "PROCESSING SPEECH…", class: "voice-processing" };
       case "THINKING":
-        return { label: "GEMINI THINKING…", class: "voice-thinking" };
+        return { label: "ULTRON THINKING…", class: "voice-thinking" };
       case "SPEAKING":
         return { label: "ULTRON SPEAKING", class: "voice-speaking" };
       case "ERROR":
@@ -695,29 +1236,41 @@ export default function VoiceMode({ onClose, onStateChange, onAudioLevel }: Voic
         </div>
       </div>
 
-      {/* Live Transcript Display */}
-      <div className="voice-transcript-area">
-        {latestUserText && (
-          <div className="voice-card voice-card-user">
-            <span className="voice-card-sender">YOU:</span>
-            <span className="voice-card-text">{latestUserText}</span>
-          </div>
-        )}
-
-        {latestUltronText && (
-          <div className="voice-card voice-card-ultron">
-            <span className="voice-card-sender">ULTRON:</span>
-            <span className="voice-card-text">{latestUltronText}</span>
-          </div>
-        )}
-
-        {!latestUserText && !latestUltronText && state !== "ERROR" && (
+      {/* Live Transcript Display - Chronological (Oldest -> Newest) */}
+      <div
+        ref={transcriptContainerRef}
+        className="voice-transcript-area"
+        onScroll={handleScroll}
+      >
+        {history.length === 0 && !latestUserText && state !== "ERROR" && (
           <div className="voice-placeholder">
             Speak naturally. ULTRON is listening continuously.
           </div>
         )}
 
+        {history.map((turn) => (
+          <div
+            key={turn.id}
+            className={`voice-card ${turn.role === "user" ? "voice-card-user" : "voice-card-ultron"}`}
+          >
+            <span className="voice-card-sender">
+              {turn.role === "user" ? "YOU:" : "ULTRON:"}
+            </span>
+            <span className="voice-card-text">{turn.text}</span>
+          </div>
+        ))}
+
+        {state === "THINKING" && (
+          <div className="voice-card voice-card-ultron" style={{ opacity: 0.8 }}>
+            <span className="voice-card-sender">ULTRON:</span>
+            <span className="voice-card-text" style={{ fontStyle: "italic", letterSpacing: "0.05em" }}>
+              Thinking…
+            </span>
+          </div>
+        )}
+
         {error && <div className="voice-error-bar">{error}</div>}
+        <div ref={transcriptBottomRef} />
       </div>
 
       {/* Footer Controls */}

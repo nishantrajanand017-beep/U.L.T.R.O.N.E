@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import {
-  generateElevenLabsSpeech,
+  generateKokoroSpeech,
+  DEFAULT_KOKORO_VOICE,
+} from "@/lib/kokoroService";
+import {
   DEFAULT_ELEVENLABS_VOICE_ID,
   DEFAULT_ELEVENLABS_VOICE_NAME,
 } from "@/lib/elevenlabsService";
 
-export { DEFAULT_ELEVENLABS_VOICE_ID, DEFAULT_ELEVENLABS_VOICE_NAME };
+// Retain backwards compatibility for existing imports
+export { DEFAULT_ELEVENLABS_VOICE_ID, DEFAULT_ELEVENLABS_VOICE_NAME, DEFAULT_KOKORO_VOICE };
 
 export async function POST(request: Request) {
   try {
@@ -18,40 +22,35 @@ export async function POST(request: Request) {
     }
 
     const textToSpeak = body.text.trim();
-    const voiceId = typeof body.voiceId === "string" ? body.voiceId.trim() : undefined;
-    const modelId = typeof body.modelId === "string" ? body.modelId.trim() : undefined;
+    const voice = typeof body.voiceId === "string" && body.voiceId.trim() ? body.voiceId.trim() : undefined;
+    const speed = typeof body.speed === "number" ? body.speed : undefined;
 
-    const { audioBuffer, voiceId: resolvedVoiceId } = await generateElevenLabsSpeech(
+    const { audioBuffer, voice: resolvedVoice, contentType } = await generateKokoroSpeech(
       textToSpeak,
-      voiceId,
-      modelId
+      voice,
+      speed
     );
 
     return new Response(audioBuffer, {
       status: 200,
       headers: {
-        "Content-Type": "audio/mpeg",
+        "Content-Type": contentType || "audio/wav",
         "Content-Length": audioBuffer.byteLength.toString(),
         "Accept-Ranges": "bytes",
         "Cache-Control": "no-cache, no-store, must-revalidate",
-        "X-ElevenLabs-Voice": resolvedVoiceId,
+        "X-TTS-Provider": "kokoro",
+        "X-TTS-Voice": resolvedVoice,
       },
     });
   } catch (err: unknown) {
-    console.error("[TTS] ElevenLabs speech generation error:", err);
+    console.error("[TTS] Kokoro speech generation error:", err);
     const msg = err instanceof Error ? err.message : "An unexpected TTS error occurred.";
 
-    if (msg.includes("ELEVENLABS_API_KEY is not configured")) {
-      return NextResponse.json({ error: msg }, { status: 500 });
-    }
-    if (msg.includes("Invalid or unauthorized ELEVENLABS_API_KEY")) {
-      return NextResponse.json({ error: msg }, { status: 401 });
-    }
-    if (msg.includes("quota limit reached")) {
-      return NextResponse.json({ error: msg }, { status: 429 });
-    }
-    if (msg.includes("Text must be a non-empty string")) {
+    if (msg.includes("must be a non-empty string")) {
       return NextResponse.json({ error: msg }, { status: 400 });
+    }
+    if (msg.includes("timed out")) {
+      return NextResponse.json({ error: msg }, { status: 504 });
     }
 
     return NextResponse.json({ error: msg }, { status: 500 });

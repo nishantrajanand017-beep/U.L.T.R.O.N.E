@@ -22,7 +22,9 @@
     "@supabase/ssr": "^0.12.6",
     "@supabase/supabase-js": "^2.115.0",
     "elevenlabs": "^1.59.0",
+    "mammoth": "^1.12.3",
     "next": "^16.2.10",
+    "pdf-parse": "^2.4.5",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "three": "^0.185.1",
@@ -30,6 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "^24",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.185.0",
