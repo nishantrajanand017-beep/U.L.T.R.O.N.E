@@ -28,6 +28,7 @@ import { GET as getDevices } from "../app/api/devices/route";
 import { POST as postPairingCreate } from "../app/api/devices/pairing/create/route";
 import { DELETE as deleteDevice } from "../app/api/devices/[deviceId]/route";
 import { GET as getApiKey, POST as postApiKey, DELETE as deleteApiKey } from "../app/api/settings/api-key/route";
+import { POST as postAuthSession, DELETE as deleteAuthSession } from "../app/api/auth/session/route";
 import type { NextRequest } from "next/server";
 
 async function runTests() {
@@ -294,6 +295,52 @@ async function runTests() {
     record(
       "Permanent user can execute get_system_time without restriction",
       timeResult.status === "success"
+    );
+  }
+
+  // --- TEST 5: Session Endpoint Synchronization & Persistence Tests ---
+  console.log("\n[5] Session Synchronization & Persistence Tests (/api/auth/session):");
+  {
+    // 5a. POST /api/auth/session without any credentials returns 401
+    const unauthReq = new Request("http://localhost:3000/api/auth/session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const unauthRes = await postAuthSession(unauthReq);
+    record(
+      "POST /api/auth/session returns 401 when no session is present",
+      unauthRes.status === 401
+    );
+
+    // 5b. POST /api/auth/session with guest cookie attaches signed session
+    const guestReq = new Request("http://localhost:3000/api/auth/session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: guestCookieHeader,
+      },
+      body: JSON.stringify({ isAnonymous: true }),
+    });
+    const guestRes = await postAuthSession(guestReq);
+    const guestJson = (await guestRes.json()) as { success: boolean; userId: string; isAnonymous: boolean };
+    const setCookie = guestRes.headers.get("set-cookie") || "";
+    record(
+      "POST /api/auth/session attaches ultron_session_id cookie and recognizes guest",
+      guestRes.status === 200 &&
+        guestJson.success === true &&
+        guestJson.isAnonymous === true &&
+        setCookie.includes(SESSION_COOKIE_NAME)
+    );
+
+    // 5c. DELETE /api/auth/session clears the session cookie
+    const logoutRes = await deleteAuthSession();
+    const logoutCookie = logoutRes.headers.get("set-cookie") || "";
+    record(
+      "DELETE /api/auth/session clears ultron_session_id cookie",
+      logoutRes.status === 200 &&
+        logoutCookie.includes(SESSION_COOKIE_NAME) &&
+        (logoutCookie.includes("Max-Age=0") || logoutCookie.includes("max-age=0"))
     );
   }
 

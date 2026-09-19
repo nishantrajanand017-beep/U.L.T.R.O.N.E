@@ -116,7 +116,9 @@ export async function resolveUserSession(request: Request): Promise<ResolvedSess
 
             if (user && !error) {
               const isAnonymous = Boolean(
-                user.is_anonymous || user.app_metadata?.provider === "anonymous"
+                user.is_anonymous ||
+                user.app_metadata?.provider === "anonymous" ||
+                user.id.startsWith("guest_")
               );
               return { userId: user.id, isAuthenticated: true, isAnonymous, isNew: false };
             }
@@ -138,7 +140,9 @@ export async function resolveUserSession(request: Request): Promise<ResolvedSess
 
         if (user && !error) {
           const isAnonymous = Boolean(
-            user.is_anonymous || user.app_metadata?.provider === "anonymous"
+            user.is_anonymous ||
+            user.app_metadata?.provider === "anonymous" ||
+            user.id.startsWith("guest_")
           );
           return { userId: user.id, isAuthenticated: true, isAnonymous, isNew: false };
         }

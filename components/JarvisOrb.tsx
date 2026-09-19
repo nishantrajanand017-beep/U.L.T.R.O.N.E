@@ -62,7 +62,9 @@ export default function JarvisOrb({
         user_metadata?: Record<string, unknown>;
       }): UserProfile => {
         const isGuest = Boolean(
-          rawUser.is_anonymous || rawUser.app_metadata?.provider === "anonymous"
+          rawUser.is_anonymous ||
+          rawUser.app_metadata?.provider === "anonymous" ||
+          rawUser.id.startsWith("guest_")
         );
         const metadata = rawUser.user_metadata || {};
         const name = isGuest
@@ -83,7 +85,7 @@ export default function JarvisOrb({
       supabase.auth.getUser().then(({ data: { user }, error }) => {
         if (user && !error) {
           setUser(extractProfile(user));
-        } else {
+        } else if (!initialUser) {
           setUser(null);
         }
       });
@@ -94,7 +96,7 @@ export default function JarvisOrb({
       } = supabase.auth.onAuthStateChange((_event, session) => {
         if (session?.user) {
           setUser(extractProfile(session.user));
-        } else {
+        } else if (!initialUser) {
           setUser(null);
         }
       });
@@ -105,7 +107,7 @@ export default function JarvisOrb({
     } catch (err) {
       console.warn("[JarvisOrb] Supabase auth check error:", err);
     }
-  }, []);
+  }, [initialUser]);
 
   // Close account menu on click outside
   useEffect(() => {
@@ -125,6 +127,11 @@ export default function JarvisOrb({
       if (isSupabaseConfigured()) {
         const supabase = createClient();
         await supabase.auth.signOut();
+      }
+      try {
+        await fetch("/api/auth/session", { method: "DELETE" });
+      } catch {
+        // Fallback
       }
     } catch (err) {
       console.warn("[JarvisOrb] Sign out error:", err);

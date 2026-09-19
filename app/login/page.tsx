@@ -78,7 +78,18 @@ export default function LoginPage() {
       }
 
       if (data.session) {
-        window.location.href = "/";
+        try {
+          await fetch("/api/auth/session", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${data.session.access_token}`,
+            },
+          });
+        } catch {
+          // Fallback
+        }
+        window.location.assign("/");
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to sign in.";
@@ -166,7 +177,21 @@ export default function LoginPage() {
       }
 
       if (data?.session || data?.user) {
-        window.location.href = "/";
+        // Synchronize and establish the signed session cookie before navigation
+        try {
+          await fetch("/api/auth/session", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(data.session?.access_token
+                ? { Authorization: `Bearer ${data.session.access_token}` }
+                : {}),
+            },
+          });
+        } catch {
+          // Session cookie establishment fallback
+        }
+        window.location.assign("/");
       } else {
         setErrorMsg("Unable to establish guest session. Please try again.");
         setGuestLoading(false);
