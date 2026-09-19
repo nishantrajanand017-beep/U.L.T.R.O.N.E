@@ -20,6 +20,7 @@ interface Message {
 
 interface ChatPanelProps {
   onClose?: () => void;
+  isGuest?: boolean;
 }
 
 // Browser SpeechRecognition interface typing
@@ -56,7 +57,7 @@ interface ISpeechRecognition extends EventTarget {
   onend: (() => void) | null;
 }
 
-export default function ChatPanel({ onClose }: ChatPanelProps) {
+export default function ChatPanel({ onClose, isGuest }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "init",
@@ -80,6 +81,14 @@ export default function ChatPanel({ onClose }: ChatPanelProps) {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (isGuest) {
+      setError("Document upload and private RAG storage are disabled for guest sessions.");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return;
+    }
 
     setIsUploadingDoc(true);
     setError(null);
@@ -546,18 +555,24 @@ export default function ChatPanel({ onClose }: ChatPanelProps) {
         <button
           type="button"
           className="chat-btn chat-upload-btn"
-          onClick={() => fileInputRef.current?.click()}
-          title="Upload document (.pdf, .docx, .txt, .md)"
+          onClick={() => {
+            if (isGuest) {
+              setError("Document upload is disabled for guest sessions. Please create an account to index private files.");
+              return;
+            }
+            fileInputRef.current?.click();
+          }}
+          title={isGuest ? "Document upload is restricted for guest sessions" : "Upload document (.pdf, .docx, .txt, .md)"}
           disabled={isLoading || isUploadingDoc}
           aria-label="Upload document"
           style={{
             background: "transparent",
-            border: "1px solid rgba(0, 240, 255, 0.3)",
-            color: isUploadingDoc ? "#ffb700" : "rgba(255, 255, 255, 0.7)",
+            border: isGuest ? "1px dashed rgba(255, 170, 48, 0.3)" : "1px solid rgba(0, 240, 255, 0.3)",
+            color: isUploadingDoc ? "#ffb700" : isGuest ? "rgba(255, 170, 48, 0.4)" : "rgba(255, 255, 255, 0.7)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            cursor: isLoading || isUploadingDoc ? "not-allowed" : "pointer",
+            cursor: isLoading || isUploadingDoc ? "not-allowed" : isGuest ? "not-allowed" : "pointer",
             width: "36px",
             height: "36px",
             borderRadius: "4px",

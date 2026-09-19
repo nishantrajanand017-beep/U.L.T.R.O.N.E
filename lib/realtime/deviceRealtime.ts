@@ -127,6 +127,7 @@ export function subscribeToDeviceChannel(
 
   const channel: RealtimeChannel = supabase.channel(channelName, {
     config: {
+      private: true,
       broadcast: {
         ack: true,
         self: false,

@@ -9,6 +9,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -132,7 +133,53 @@ export default function LoginPage() {
     }
   };
 
-  const isSubmitting = loading || googleLoading;
+  const handleGuestLogin = async () => {
+    if (isSubmitting) return;
+
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    if (!isSupabaseConfigured()) {
+      setErrorMsg(
+        "Supabase authentication is not configured. Please define NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in your environment."
+      );
+      return;
+    }
+
+    try {
+      setGuestLoading(true);
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signInAnonymously();
+
+      if (error) {
+        let msg = error.message;
+        if (
+          msg.toLowerCase().includes("anonymous sign-ins are disabled") ||
+          error.status === 422
+        ) {
+          msg =
+            "Supabase Anonymous Sign-In is disabled. Please enable it in the Supabase Dashboard under Authentication -> Providers -> Anonymous Sign-Ins.";
+        }
+        setErrorMsg(msg);
+        setGuestLoading(false);
+        return;
+      }
+
+      if (data?.session || data?.user) {
+        window.location.href = "/";
+      } else {
+        setErrorMsg("Unable to establish guest session. Please try again.");
+        setGuestLoading(false);
+      }
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to start guest session.";
+      setErrorMsg(msg);
+      setGuestLoading(false);
+    }
+  };
+
+  const isSubmitting = loading || googleLoading || guestLoading;
 
   return (
     <main className="login-root">
@@ -253,6 +300,17 @@ export default function LoginPage() {
                 <span>Continue with Google</span>
               </>
             )}
+          </button>
+
+          <button
+            type="button"
+            id="btn-guest-login"
+            className="login-btn-guest"
+            onClick={handleGuestLogin}
+            disabled={isSubmitting}
+            aria-label="Continue as Guest"
+          >
+            {guestLoading ? "ESTABLISHING GUEST SESSION…" : "CONTINUE AS GUEST"}
           </button>
 
           <div className="login-switch-link">

@@ -47,6 +47,14 @@ export async function executeTool(
 
   const { name } = toolCall.function;
 
+  // 1b. Restrict guest/anonymous callers from physical device or private controls
+  if (context.isAnonymous && name !== "get_system_time") {
+    return {
+      status: "error",
+      error: "Permission denied: Guest operators cannot interact with physical devices or private controls.",
+    };
+  }
+
   // 2. Validate tool exists in registry
   if (!isToolRegistered(name)) {
     return {

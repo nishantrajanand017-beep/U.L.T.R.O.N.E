@@ -8,11 +8,17 @@ import {
 
 export async function GET(request: Request) {
   try {
-    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(request);
     if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Authentication required." },
         { status: 401 }
+      );
+    }
+    if (isAnonymous) {
+      return NextResponse.json(
+        { error: "Forbidden: Guest sessions cannot access or modify API key settings." },
+        { status: 403 }
       );
     }
     const info = await getUserApiKeyPublicInfo(userId);
@@ -40,11 +46,17 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(request);
     if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Authentication required." },
         { status: 401 }
+      );
+    }
+    if (isAnonymous) {
+      return NextResponse.json(
+        { error: "Forbidden: Guest sessions cannot access or modify API key settings." },
+        { status: 403 }
       );
     }
     const body = await request.json().catch(() => null);
@@ -84,11 +96,17 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(request);
     if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Authentication required." },
         { status: 401 }
+      );
+    }
+    if (isAnonymous) {
+      return NextResponse.json(
+        { error: "Forbidden: Guest sessions cannot access or modify API key settings." },
+        { status: 403 }
       );
     }
     const removed = await deleteUserApiKey(userId);

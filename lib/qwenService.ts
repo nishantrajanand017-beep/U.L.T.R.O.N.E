@@ -43,9 +43,19 @@ export class QwenServiceError extends Error {
   }
 }
 
-export const DEFAULT_QWEN_BASE_URL = "http://127.0.0.1:11434/v1";
-export const DEFAULT_QWEN_MODEL = "qwen3:8b";
-export const DEFAULT_TIMEOUT_MS = 120_000; // 120 seconds
+import {
+  getInferenceEndpoint,
+  getQwenCompletionsUrl,
+  getInferenceAuthHeaders,
+  getInferenceTimeoutMs,
+  mapInferenceError,
+  DEFAULT_LOCAL_URLS,
+  DEFAULT_TIMEOUTS_MS,
+} from "./ai/inferenceConfig";
+
+export const DEFAULT_QWEN_BASE_URL = DEFAULT_LOCAL_URLS.qwen;
+export const DEFAULT_QWEN_MODEL = "Qwen/Qwen3-4B";
+export const DEFAULT_TIMEOUT_MS = DEFAULT_TIMEOUTS_MS.qwen;
 
 /**
  * Standard ULTRON persona system prompt.
@@ -106,7 +116,7 @@ export function cleanSpokenText(text: string): string {
 
 
 export function getQwenBaseUrl(): string {
-  return (process.env.QWEN_BASE_URL?.trim() || DEFAULT_QWEN_BASE_URL).replace(/\/+$/, "");
+  return getInferenceEndpoint("qwen").replace(/\/+$/, "");
 }
 
 export function getQwenModel(): string {
@@ -131,11 +141,10 @@ export async function generateQwenResponse(
     throw new QwenServiceError("Invalid request: prompt or history must not be empty.", 400);
   }
 
-  const baseUrl = getQwenBaseUrl();
-  const endpoint = `${baseUrl}/chat/completions`;
+  const endpoint = getQwenCompletionsUrl();
   const model = options.model || getQwenModel();
   const systemPrompt = options.systemPrompt ?? ULTRON_SYSTEM_PROMPT;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? getInferenceTimeoutMs("qwen");
   const temperature = options.temperature ?? 0.6;
   const maxTokens = options.maxTokens ?? 2048;
 
@@ -174,14 +183,14 @@ export async function generateQwenResponse(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  const headers = getInferenceAuthHeaders("qwen", {
+    "Content-Type": "application/json",
+  });
+
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Harmless local auth header for OpenAI compatibility
-        Authorization: "Bearer ollama-local",
-      },
+      headers,
       body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
@@ -189,25 +198,15 @@ export async function generateQwenResponse(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      let errorDetail = "";
-      try {
-        const errorJson = await response.json();
-        errorDetail = errorJson?.error?.message || errorJson?.error || JSON.stringify(errorJson);
-      } catch {
-        errorDetail = await response.text().catch(() => "");
-      }
-
       if (response.status === 404) {
         throw new QwenServiceError(
-          `Qwen model '${model}' not found in local Ollama library. Please verify with 'ollama list'.`,
+          `Qwen model '${model}' not found on upstream inference server.`,
           404
         );
       }
 
-      throw new QwenServiceError(
-        `Ollama returned HTTP ${response.status}: ${errorDetail || response.statusText}`,
-        response.status
-      );
+      const mapped = mapInferenceError(new Error(`Upstream returned ${response.status}`), "qwen", response.status);
+      throw new QwenServiceError(mapped.publicMessage, mapped.statusCode);
     }
 
     const data = await response.json().catch(() => null);
@@ -276,21 +275,7 @@ export async function generateQwenResponse(
       throw err;
     }
 
-    if (err instanceof Error && err.name === "AbortError") {
-      throw new QwenServiceError(
-        `Qwen request timed out after ${timeoutMs / 1000}s. The local engine may be under heavy load.`,
-        504
-      );
-    }
-
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("ECONNREFUSED") || msg.includes("fetch failed")) {
-      throw new QwenServiceError(
-        "Cannot connect to local Ollama server at 127.0.0.1:11434. Please ensure Ollama is running.",
-        503
-      );
-    }
-
-    throw new QwenServiceError("An unexpected error occurred while communicating with Qwen.", 500);
+    const mapped = mapInferenceError(err, "qwen");
+    throw new QwenServiceError(mapped.publicMessage, mapped.statusCode);
   }
 }

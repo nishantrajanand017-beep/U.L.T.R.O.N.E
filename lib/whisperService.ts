@@ -1,5 +1,13 @@
-export const DEFAULT_WHISPER_API_URL = "http://127.0.0.1:8881/v1/audio/transcriptions";
-export const DEFAULT_WHISPER_MODEL = "large-v3-turbo";
+import {
+  getInferenceEndpoint,
+  getInferenceAuthHeaders,
+  getInferenceTimeoutMs,
+  mapInferenceError,
+  DEFAULT_LOCAL_URLS,
+} from "./ai/inferenceConfig";
+
+export const DEFAULT_WHISPER_API_URL = DEFAULT_LOCAL_URLS.whisper;
+export const DEFAULT_WHISPER_MODEL = "small";
 export const DEFAULT_WHISPER_LANGUAGE = "en";
 
 export interface WhisperTranscriptionOptions {
@@ -23,9 +31,10 @@ export async function transcribeAudioWithWhisper(
   fileName: string = "speech.webm",
   options?: WhisperTranscriptionOptions
 ): Promise<WhisperTranscriptionResult> {
-  const apiUrl = (process.env.WHISPER_API_URL || DEFAULT_WHISPER_API_URL).trim();
+  const apiUrl = getInferenceEndpoint("whisper");
   const model = options?.model || process.env.WHISPER_MODEL || DEFAULT_WHISPER_MODEL;
   const language = options?.language || process.env.WHISPER_LANGUAGE || DEFAULT_WHISPER_LANGUAGE;
+  const timeoutMs = getInferenceTimeoutMs("whisper");
 
   const formData = new FormData();
 
@@ -43,40 +52,37 @@ export async function transcribeAudioWithWhisper(
     formData.append("language", language);
   }
 
+  const headers = getInferenceAuthHeaders("whisper");
+
   let response: Response;
   try {
     response = await fetch(apiUrl, {
       method: "POST",
+      headers,
       body: formData,
-      signal: AbortSignal.timeout(20000), // 20-second timeout guard
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err: unknown) {
-    const isTimeout = (err as Error)?.name === "TimeoutError";
-    const msg = isTimeout
-      ? "Whisper STT service timed out after 20 seconds."
-      : `Failed to connect to local Whisper STT server at internal endpoint: ${(err as Error)?.message || "Connection refused"}`;
-    const error = new Error(msg);
-    (error as any).status = 503;
+    const mapped = mapInferenceError(err, "whisper");
+    const error = new Error(mapped.publicMessage);
+    (error as any).status = mapped.statusCode;
     throw error;
   }
 
   if (!response.ok) {
-    const errText = await response.text().catch(() => "Unknown upstream STT error");
-    let parsedMessage = errText;
-    try {
-      const parsed = JSON.parse(errText);
-      if (parsed.detail) {
-        parsedMessage = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
-      }
-    } catch {
-      // keep raw errText
-    }
-    const error = new Error(`Whisper STT failed: ${parsedMessage}`);
-    (error as any).status = response.status >= 500 ? 502 : response.status;
+    const mapped = mapInferenceError(new Error("Upstream Whisper error"), "whisper", response.status);
+    const error = new Error(mapped.publicMessage);
+    (error as any).status = mapped.statusCode;
     throw error;
   }
 
-  const data = await response.json();
+  const data = await response.json().catch(() => null);
+  if (!data) {
+    const error = new Error("Received malformed or empty JSON from Whisper STT endpoint.");
+    (error as any).status = 502;
+    throw error;
+  }
+
   const text = (data.text || "").trim();
 
   return {

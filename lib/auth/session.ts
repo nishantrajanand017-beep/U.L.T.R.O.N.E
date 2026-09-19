@@ -80,6 +80,7 @@ export function verifySignedSessionToken(token: string): string | null {
 export interface ResolvedSession {
   userId: string | null;
   isAuthenticated: boolean;
+  isAnonymous?: boolean;
   isNew?: boolean;
 }
 
@@ -114,13 +115,16 @@ export async function resolveUserSession(request: Request): Promise<ResolvedSess
             } = await supabase.auth.getUser(token);
 
             if (user && !error) {
-              return { userId: user.id, isAuthenticated: true, isNew: false };
+              const isAnonymous = Boolean(
+                user.is_anonymous || user.app_metadata?.provider === "anonymous"
+              );
+              return { userId: user.id, isAuthenticated: true, isAnonymous, isNew: false };
             }
           } catch {
             // Failed Supabase verification
           }
           // An arbitrary bearer token that fails Supabase verification is rejected
-          return { userId: null, isAuthenticated: false, isNew: false };
+          return { userId: null, isAuthenticated: false, isAnonymous: false, isNew: false };
         }
       }
 
@@ -133,7 +137,10 @@ export async function resolveUserSession(request: Request): Promise<ResolvedSess
         } = await supabase.auth.getUser();
 
         if (user && !error) {
-          return { userId: user.id, isAuthenticated: true, isNew: false };
+          const isAnonymous = Boolean(
+            user.is_anonymous || user.app_metadata?.provider === "anonymous"
+          );
+          return { userId: user.id, isAuthenticated: true, isAnonymous, isNew: false };
         }
       } catch {
         // Ignored if called outside Next.js request context
@@ -153,7 +160,8 @@ export async function resolveUserSession(request: Request): Promise<ResolvedSess
         if (val) {
           const verified = verifySignedSessionToken(val);
           if (verified) {
-            return { userId: verified, isAuthenticated: true, isNew: false };
+            const isAnonymous = verified.startsWith("guest_");
+            return { userId: verified, isAuthenticated: true, isAnonymous, isNew: false };
           }
           // Cookie was provided but signature is invalid or tampered
           return { userId: null, isAuthenticated: false, isNew: false };

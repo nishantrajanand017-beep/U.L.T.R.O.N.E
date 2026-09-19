@@ -41,6 +41,8 @@ export interface ToolCall {
 export interface ToolExecutionContext {
   /** Authenticated user ID (must always be present for tenant isolation) */
   userId: string;
+  /** Whether the user is an anonymous/guest session */
+  isAnonymous?: boolean;
 }
 
 export interface PendingActionDetails {

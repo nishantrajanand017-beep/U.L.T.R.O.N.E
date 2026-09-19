@@ -1704,24 +1704,40 @@ body {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 40px;
-  padding: 8px 16px;
-  background: transparent;
-  border: 1px solid rgba(255, 170, 48, 0.3);
+  min-height: 42px;
+  padding: 10px 18px;
+  background: rgba(25, 12, 0, 0.4);
+  border: 1px dashed rgba(255, 170, 48, 0.45);
   border-radius: 4px;
-  color: rgba(255, 204, 102, 0.75);
+  color: rgba(255, 204, 102, 0.85);
   font-family: "Courier New", monospace;
-  font-size: 11px;
-  letter-spacing: 0.14em;
+  font-size: 11.5px;
+  font-weight: bold;
+  letter-spacing: 0.16em;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
   text-decoration: none;
+  margin-top: 4px;
 }
 
-.login-btn-guest:hover {
-  border-color: rgba(255, 204, 102, 0.65);
-  color: #ffe6aa;
-  background: rgba(255, 170, 48, 0.08);
+.login-btn-guest:hover:not(:disabled) {
+  border-color: #ffcc66;
+  border-style: solid;
+  color: #ffffff;
+  background: rgba(255, 170, 48, 0.15);
+  box-shadow: 0 0 16px rgba(255, 170, 48, 0.25);
+  transform: translateY(-1px);
+}
+
+.login-btn-guest:active:not(:disabled) {
+  transform: translateY(0);
+  background: rgba(255, 170, 48, 0.22);
+}
+
+.login-btn-guest:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .login-footer {
@@ -1841,6 +1857,24 @@ body {
   flex-shrink: 0;
 }
 
+.hud-account-status-dot.guest {
+  background: #ffaa30;
+  box-shadow: 0 0 8px #ffaa30;
+}
+
+.hud-guest-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: rgba(255, 170, 48, 0.18);
+  border: 1px solid rgba(255, 170, 48, 0.5);
+  color: #ffcc66;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  font-weight: bold;
+}
+
 .hud-account-chevron {
   font-size: 9px;
   color: rgba(255, 170, 48, 0.7);
@@ -1958,6 +1992,67 @@ body {
   background: #00f0ff;
   box-shadow: 0 0 6px #00f0ff;
   border-radius: 50%;
+}
+
+.hud-popover-badge.guest {
+  color: #ffaa30;
+}
+
+.hud-popover-badge.guest::before {
+  background: #ffaa30;
+  box-shadow: 0 0 6px #ffaa30;
+}
+
+.hud-popover-guest-notice {
+  font-size: 9.5px;
+  line-height: 1.45;
+  color: rgba(255, 170, 48, 0.85);
+  background: rgba(40, 20, 0, 0.6);
+  border: 1px solid rgba(255, 170, 48, 0.35);
+  border-radius: 3px;
+  padding: 8px 10px;
+  letter-spacing: 0.08em;
+}
+
+.hud-popover-register-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 32px;
+  background: rgba(80, 40, 0, 0.75);
+  border: 1px solid rgba(255, 170, 48, 0.6);
+  border-radius: 3px;
+  color: #ffcc66;
+  font-family: "Courier New", monospace;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 0.14em;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.hud-popover-register-btn:hover {
+  background: rgba(110, 55, 0, 0.9);
+  border-color: #ffcc66;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(255, 170, 48, 0.35);
+}
+
+.settings-guest-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(60, 25, 0, 0.7);
+  border: 1px solid rgba(255, 170, 48, 0.6);
+  border-radius: 4px;
+  color: #ffe6aa;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  line-height: 1.4;
+  margin-bottom: 16px;
+  text-shadow: 0 0 6px rgba(255, 170, 48, 0.4);
 }
 
 .hud-account-signout-btn {

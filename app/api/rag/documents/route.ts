@@ -17,11 +17,17 @@ import {
  */
 export async function GET(req: NextRequest) {
   try {
-    const { userId, isAuthenticated, isNew } = await resolveUserSession(req);
+    const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(req);
     if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Authentication required." },
         { status: 401 }
+      );
+    }
+    if (isAnonymous) {
+      return NextResponse.json(
+        { error: "Forbidden: Guest sessions cannot access or search private documents." },
+        { status: 403 }
       );
     }
     const documents = await listDocuments(userId);
@@ -54,11 +60,17 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const { userId, isAuthenticated, isNew } = await resolveUserSession(req);
+    const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(req);
     if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Authentication required." },
         { status: 401 }
+      );
+    }
+    if (isAnonymous) {
+      return NextResponse.json(
+        { error: "Forbidden: Guest sessions cannot upload or store private documents." },
+        { status: 403 }
       );
     }
 
@@ -163,11 +175,17 @@ export async function POST(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
-    const { userId, isAuthenticated, isNew } = await resolveUserSession(req);
+    const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(req);
     if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Authentication required." },
         { status: 401 }
+      );
+    }
+    if (isAnonymous) {
+      return NextResponse.json(
+        { error: "Forbidden: Guest sessions cannot delete private documents." },
+        { status: 403 }
       );
     }
     const documentId = req.nextUrl.searchParams.get("id");

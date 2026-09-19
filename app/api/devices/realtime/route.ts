@@ -67,6 +67,7 @@ export async function GET(request: Request) {
       provider: isSupabaseConfigured ? "supabase" : "legacy_ws",
       channel,
       phoenixTopic,
+      private: true,
       realtimeWsUrl: isSupabaseConfigured ? realtimeWsUrl : legacyWsUrl,
       supabaseUrl: isSupabaseConfigured ? supabaseUrl : undefined,
       supabaseAnonKey: isSupabaseConfigured ? supabaseAnonKey : undefined,

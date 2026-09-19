@@ -7,11 +7,17 @@ export async function DELETE(
   props: { params: Promise<{ deviceId: string }> }
 ) {
   try {
-    const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+    const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(request);
     if (!userId || !isAuthenticated) {
       return NextResponse.json(
         { error: "Unauthorized: Authentication required." },
         { status: 401 }
+      );
+    }
+    if (isAnonymous) {
+      return NextResponse.json(
+        { error: "Forbidden: Guest sessions cannot unpair devices." },
+        { status: 403 }
       );
     }
     const { deviceId } = await props.params;

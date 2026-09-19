@@ -1,4 +1,12 @@
-export const DEFAULT_KOKORO_API_URL = "http://127.0.0.1:8880/v1/audio/speech";
+import {
+  getInferenceEndpoint,
+  getInferenceAuthHeaders,
+  getInferenceTimeoutMs,
+  mapInferenceError,
+  DEFAULT_LOCAL_URLS,
+} from "./ai/inferenceConfig";
+
+export const DEFAULT_KOKORO_API_URL = DEFAULT_LOCAL_URLS.kokoro;
 export const DEFAULT_KOKORO_VOICE = "am_adam";
 export const DEFAULT_KOKORO_MODEL = "kokoro";
 export const DEFAULT_KOKORO_SPEED = 1.0;
@@ -22,15 +30,18 @@ export async function generateKokoroSpeech(
 ): Promise<KokoroSpeechResult> {
   const trimmedText = text?.trim();
   if (!trimmedText) {
-    throw new Error("TTS failed: Text must be a non-empty string.");
+    const err = new Error("TTS failed: Text must be a non-empty string.");
+    (err as any).status = 400;
+    throw err;
   }
 
-  const apiUrl = (process.env.KOKORO_API_URL || DEFAULT_KOKORO_API_URL).trim();
+  const apiUrl = getInferenceEndpoint("kokoro");
   const voice = targetVoice?.trim() || process.env.KOKORO_VOICE?.trim() || DEFAULT_KOKORO_VOICE;
   const speed =
     typeof targetSpeed === "number" && !isNaN(targetSpeed) && targetSpeed > 0
       ? targetSpeed
       : parseFloat(process.env.KOKORO_SPEED || "1.0") || DEFAULT_KOKORO_SPEED;
+  const timeoutMs = getInferenceTimeoutMs("kokoro");
 
   const payload = {
     model: DEFAULT_KOKORO_MODEL,
@@ -40,35 +51,40 @@ export async function generateKokoroSpeech(
     speed: speed,
   };
 
+  const headers = getInferenceAuthHeaders("kokoro", {
+    "Content-Type": "application/json",
+    Accept: "audio/wav",
+  });
+
   let response: Response;
   try {
     response = await fetch(apiUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "audio/wav",
-      },
+      headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(20000), // 20-second timeout guard
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err: unknown) {
-    const isTimeout = (err as Error)?.name === "TimeoutError";
-    const msg = isTimeout
-      ? "Kokoro TTS service timed out after 20 seconds."
-      : `Failed to connect to Kokoro TTS server at internal endpoint: ${(err as Error)?.message || "Connection refused"}`;
-    throw new Error(msg);
+    const mapped = mapInferenceError(err, "kokoro");
+    const error = new Error(mapped.publicMessage);
+    (error as any).status = mapped.statusCode;
+    throw error;
   }
 
   if (!response.ok) {
-    const errText = await response.text().catch(() => "Unknown Kokoro error");
-    throw new Error(`Kokoro TTS synthesis failed (HTTP ${response.status}): ${errText}`);
+    const mapped = mapInferenceError(new Error("Upstream Kokoro error"), "kokoro", response.status);
+    const error = new Error(mapped.publicMessage);
+    (error as any).status = mapped.statusCode;
+    throw error;
   }
 
   const contentType = response.headers.get("content-type") || "audio/wav";
   const audioBuffer = await response.arrayBuffer();
 
   if (audioBuffer.byteLength === 0) {
-    throw new Error("Kokoro TTS returned 0 bytes of audio.");
+    const error = new Error("Kokoro TTS returned 0 bytes of audio.");
+    (error as any).status = 502;
+    throw error;
   }
 
   const inferTimeHeader = response.headers.get("x-inference-time-ms");

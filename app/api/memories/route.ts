@@ -23,12 +23,19 @@ import {
  * Returns memories strictly belonging to the authenticated user.
  */
 export async function GET(request: Request) {
-  const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+  const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(request);
 
   if (!userId || !isAuthenticated) {
     return NextResponse.json(
       { error: "Unauthorized: Authentication required." },
       { status: 401 }
+    );
+  }
+
+  if (isAnonymous) {
+    return NextResponse.json(
+      { error: "Forbidden: Guest sessions cannot access or store persistent memories." },
+      { status: 403 }
     );
   }
 
@@ -57,12 +64,19 @@ export async function GET(request: Request) {
  * Saves or updates a memory explicitly for the authenticated user.
  */
 export async function POST(request: Request) {
-  const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+  const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(request);
 
   if (!userId || !isAuthenticated) {
     return NextResponse.json(
       { error: "Unauthorized: Authentication required." },
       { status: 401 }
+    );
+  }
+
+  if (isAnonymous) {
+    return NextResponse.json(
+      { error: "Forbidden: Guest sessions cannot access or store persistent memories." },
+      { status: 403 }
     );
   }
 
@@ -111,12 +125,19 @@ export async function POST(request: Request) {
  * Deletes a single memory (?id=...) or clears all memories for the user (?all=true).
  */
 export async function DELETE(request: Request) {
-  const { userId, isAuthenticated, isNew } = await resolveUserSession(request);
+  const { userId, isAuthenticated, isAnonymous, isNew } = await resolveUserSession(request);
 
   if (!userId || !isAuthenticated) {
     return NextResponse.json(
       { error: "Unauthorized: Authentication required." },
       { status: 401 }
+    );
+  }
+
+  if (isAnonymous) {
+    return NextResponse.json(
+      { error: "Forbidden: Guest sessions cannot access or store persistent memories." },
+      { status: 403 }
     );
   }
   const url = new URL(request.url);

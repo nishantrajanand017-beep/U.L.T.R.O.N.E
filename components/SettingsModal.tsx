@@ -7,6 +7,7 @@ import { getApprovedAppsList, type AllowedAppConfig } from "@/lib/constants/appA
 
 interface SettingsModalProps {
   onClose: () => void;
+  isGuest?: boolean;
 }
 
 interface ApiKeyStatusResponse {
@@ -57,7 +58,7 @@ const STATUS_LABELS: Record<KeyStatus, { label: string; className: string }> = {
   },
 };
 
-export default function SettingsModal({ onClose }: SettingsModalProps) {
+export default function SettingsModal({ onClose, isGuest }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<"api" | "devices" | "preferences">("api");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -158,6 +159,13 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
   // Generate pairing code
   const handleGeneratePairing = async () => {
+    if (isGuest) {
+      setDevicesFeedback({
+        type: "error",
+        message: "Guest sessions cannot pair companion devices.",
+      });
+      return;
+    }
     setIsGeneratingPairing(true);
     setDevicesFeedback(null);
 
@@ -257,6 +265,10 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   // Handle Save / Update key
   const handleSaveKey = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (isGuest) {
+      setFeedback({ type: "error", message: "Guest sessions cannot save custom API keys." });
+      return;
+    }
     const trimmed = apiKeyInput.trim();
     if (!trimmed) {
       setFeedback({ type: "error", message: "Please enter a valid API key." });
@@ -430,6 +442,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
         {/* Content Area */}
         <div className="settings-content">
+          {isGuest && (
+            <div className="settings-guest-alert" role="alert">
+              <span>⚠</span>
+              <div>
+                <strong>GUEST OPERATOR MODE:</strong> Account settings, custom API keys, and device pairing are disabled for guest sessions. Please sign in with a registered account to configure permanent settings.
+              </div>
+            </div>
+          )}
           {activeTab === "api" && (
             <div className="settings-section">
               <div className="settings-notice-box">
@@ -546,7 +566,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                   type="button"
                   className="hud-btn settings-btn settings-save-btn"
                   onClick={handleSaveKey}
-                  disabled={isSaving || isTesting || !apiKeyInput.trim()}
+                  disabled={isGuest || isSaving || isTesting || !apiKeyInput.trim()}
                 >
                   {isSaving ? "SAVING..." : statusData?.isConfigured ? "UPDATE KEY" : "SAVE KEY"}
                 </button>
@@ -637,7 +657,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                       className="hud-btn settings-btn"
                       style={{ height: "30px", fontSize: "10.5px", padding: "0 12px" }}
                       onClick={handleGeneratePairing}
-                      disabled={isGeneratingPairing}
+                      disabled={isGuest || isGeneratingPairing}
                     >
                       {isGeneratingPairing ? "GENERATING..." : "+ PAIR ANDROID DEVICE"}
                     </button>

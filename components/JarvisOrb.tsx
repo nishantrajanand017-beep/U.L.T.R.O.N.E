@@ -13,6 +13,7 @@ interface UserProfile {
   name: string;
   email: string;
   avatarUrl?: string;
+  isGuest?: boolean;
 }
 
 type CameraState = "off" | "starting" | "on" | "error";
@@ -56,20 +57,26 @@ export default function JarvisOrb({
       const extractProfile = (rawUser: {
         id: string;
         email?: string;
+        is_anonymous?: boolean;
+        app_metadata?: Record<string, unknown>;
         user_metadata?: Record<string, unknown>;
       }): UserProfile => {
+        const isGuest = Boolean(
+          rawUser.is_anonymous || rawUser.app_metadata?.provider === "anonymous"
+        );
         const metadata = rawUser.user_metadata || {};
-        const name =
-          (typeof metadata.full_name === "string" && metadata.full_name) ||
-          (typeof metadata.name === "string" && metadata.name) ||
-          rawUser.email?.split("@")[0] ||
-          "OPERATOR";
-        const email = rawUser.email || "";
+        const name = isGuest
+          ? "GUEST OPERATOR"
+          : (typeof metadata.full_name === "string" && metadata.full_name) ||
+            (typeof metadata.name === "string" && metadata.name) ||
+            rawUser.email?.split("@")[0] ||
+            "OPERATOR";
+        const email = rawUser.email || (isGuest ? "guest@ultron.internal" : "");
         const avatarUrl =
           (typeof metadata.avatar_url === "string" && metadata.avatar_url) ||
           (typeof metadata.picture === "string" && metadata.picture) ||
           undefined;
-        return { id: rawUser.id, name, email, avatarUrl };
+        return { id: rawUser.id, name, email, avatarUrl, isGuest };
       };
 
       // Initial user check
@@ -265,7 +272,11 @@ export default function JarvisOrb({
                 </div>
               )}
               <span className="hud-account-username">{user.name.toUpperCase()}</span>
-              <span className="hud-account-status-dot" title="Authenticated" />
+              {user.isGuest && <span className="hud-guest-tag">GUEST</span>}
+              <span
+                className={`hud-account-status-dot${user.isGuest ? " guest" : ""}`}
+                title={user.isGuest ? "Guest Session (Restricted)" : "Authenticated"}
+              />
               <span className={`hud-account-chevron${accountMenuOpen ? " open" : ""}`}>
                 ▼
               </span>
@@ -311,8 +322,25 @@ export default function JarvisOrb({
 
                 <div className="hud-popover-status-row">
                   <span>AUTH STATUS</span>
-                  <span className="hud-popover-badge">AUTHENTICATED</span>
+                  <span className={`hud-popover-badge${user.isGuest ? " guest" : ""}`}>
+                    {user.isGuest ? "GUEST (RESTRICTED)" : "AUTHENTICATED"}
+                  </span>
                 </div>
+
+                {user.isGuest && (
+                  <>
+                    <div className="hud-popover-guest-notice">
+                      EPHEMERAL SESSION // DATA &amp; SETTINGS LOCKED
+                    </div>
+                    <a
+                      href="/register"
+                      className="hud-popover-register-btn"
+                      aria-label="Create a permanent account"
+                    >
+                      UPGRADE // CREATE ACCOUNT
+                    </a>
+                  </>
+                )}
 
                 <button
                   type="button"
@@ -360,7 +388,12 @@ export default function JarvisOrb({
         )}
       </div>
 
-      {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
+      {chatOpen && (
+        <ChatPanel
+          isGuest={Boolean(user?.isGuest)}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
       {voiceOpen && (
         <VoiceMode
           onClose={() => {
@@ -372,7 +405,12 @@ export default function JarvisOrb({
           onAudioLevel={(l) => sceneRef.current?.setAudioLevel(l)}
         />
       )}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsModal
+          isGuest={Boolean(user?.isGuest)}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       <div className="hud hud-controls">
         <div className={`camera-panel${cameraOn ? " visible" : ""}`}>

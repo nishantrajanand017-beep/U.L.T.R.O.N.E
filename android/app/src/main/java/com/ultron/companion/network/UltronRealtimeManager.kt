@@ -220,6 +220,7 @@ class UltronRealtimeManager private constructor(
                                     put("ack", false)
                                     put("self", false)
                                 })
+                                put("private", true)
                             })
                         })
                         put("ref", joinRef)
